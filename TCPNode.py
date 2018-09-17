@@ -1,10 +1,11 @@
-# Copyright CARACORACLE
-
 import socket
 import threading
+import struct
+import sys
 
 
 class TCPNode:
+    TRIPLET_SIZE = 8
 
     def __init__(self, ip, port):
         self.port = port
@@ -12,40 +13,88 @@ class TCPNode:
         self.routing_table = {}
         self.reachability_table = {}
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print("CONSTRUCTOR EXECUTED")
+        print("[NODE] CONSTRUCTOR EXECUTED")
 
     def start_node(self):
         """ Create two new threads, one to handle console commands and another to listen to incoming connections. """
-        print("START EXECUTED")
+        print("[NODE] START EXECUTED")
         connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
         self.handle_console_commands()
 
     def handle_incoming_connections(self):
-        print("LISTENING TO INCOMING CONNECTIONS")
+        print("[NODE] LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
         self.sock.listen(self.port)
 
         while True:
             conn, addr = self.sock.accept()
-            print('CONNECTED WITH ', conn, ':', addr)
+            print('[NODE] CONNECTED WITH ', conn, ':', addr)
             with conn:
-                data = conn.recv(1024)
-                if not data:
-                    continue
-                print("[NODE] "+repr(data))
 
-        self.sock.close
+                # The first 2 bytes contain the amount of triplets in the message
+                length = struct.unpack('!H', conn.recv(2))[0]
+                print('[NODE] RECEIVED A MESSAGE WITH', length, 'TRIPLETS:')
+
+                for i in range(0, length):
+                    # struct
+                    message = conn.recv(self.TRIPLET_SIZE-3)
+                    triplets = struct.unpack('!BBBBB', message)
+                    print('[NODE] ADDRESS: ', triplets[i], '.', triplets[1], '.', triplets[2], '.', triplets[3],
+                          ', SUBNET MASK: ', triplets[4], ', COST: ', int(conn.recv(3)), sep='')
 
     def send_message(self, ip, port, message):
-        print("[NODE] SENDING ", message, " TO ", ip, ":", port)
+        print("[NODE] SENDING ", len(message), " BYTES TO ", ip, ":", port)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as host_socket:
             host_socket.connect((ip, port))
-            host_socket.sendall(b'Hello, world')
+            host_socket.sendall(message)
 
     def handle_console_commands(self):
         while True:
             command = input("[NODE] Enter your command...\n").strip().split(" ")
             if command[0] == "sendMessage":
-                self.send_message(ip=command[1], port=int(command[2]), message=command[3])
+                message = self.read_message()
+                self.send_message(ip=command[1], port=int(command[2]), message=message)
+            elif command[0] == "exit":
+                sys.exit(1)
 
+    def stop_node(self):
+        # Close all open connections and terminate all threads
+        pass
+
+    def read_message(self):
+        length = int(input("[NODE] Enter the length of your message...\n"))
+
+        # The message wiull be 2 bytes (length) + the size of each triplet * the amount of triplets
+        message = bytearray(length*self.TRIPLET_SIZE+2)
+        cost = bytearray(4)
+
+        # The first 2 bytes of the message (H is 2 bytes) should be the length of triplets in the message
+        struct.pack_into("!H", message, 0, length)
+
+        # Counts bytes already written, in order to add information in the right location
+        offset = 2
+
+        # Then add 8 bytes per triplet (4 for IP, 1 for mask, 3 for cost)
+        for i in range(0, length):
+            current_message = \
+                input("[NODE] Type the message to be sent as follows:\n<IP address> <subnet mask> <cost>\n")\
+                .strip().split(' ')
+            address = current_message[0].strip().split('.')
+
+            # Each triplet is coded with the following 8-byte format:
+            # BBBB (4 bytes) network address
+            # B    (1 byte) subnet mask
+            # I    (4 bytes) cost. The cost should only be 3 bytes, this is handled below.
+            struct.pack_into('!BBBBB', message, offset, int(address[0]), int(address[1]), int(address[2]), int(address[3]), int(current_message[1]))
+
+            # Pack the cost into a 4 byte buffer
+            cost = struct.pack('!I', int(current_message[2]))
+
+            # Write the cost into the message buffer, dropping the most significant byte
+            message.extend(cost[1:3])
+
+            # Move the offset to write the next triplet
+            offset += self.TRIPLET_SIZE
+
+        return message

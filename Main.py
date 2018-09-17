@@ -2,7 +2,6 @@ from multiprocessing import Process
 from TCPNode import TCPNode
 from UDPNode import UDPNode
 
-
 def create_node(node_type, ip, port):
     if node_type == "intAs":
         node = UDPNode(ip, port)
@@ -13,10 +12,9 @@ def create_node(node_type, ip, port):
         return
     node_process = Process(target=node.start_node())
 
-
 while True:
     # Read a command from the user
-    command = input("Enter your command...\n").strip().split(" ")
+    command = input("[MAIN] Enter your command...\n").strip().split(" ")
 
     if len(command) != 4:
         print("Unrecognized command, try again.")
