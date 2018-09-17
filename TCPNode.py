@@ -1,7 +1,8 @@
-import socket
 import threading
 import struct
 import sys
+import readline
+import socket
 
 
 class TCPNode:
@@ -13,28 +14,33 @@ class TCPNode:
         self.routing_table = {}
         self.reachability_table = {}
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print("[NODE] CONSTRUCTOR EXECUTED")
+        print("[PseudoBGP Node]")
+        print("Address:", ip)
+        print("Port:", port)
 
     def start_node(self):
-        """ Create two new threads, one to handle console commands and another to listen to incoming connections. """
-        print("[NODE] START EXECUTED")
-        connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
+        """ Create two new threads
+        one to handle console commands and
+        another to listen to incoming connections. """
+        print("START EXECUTED")
+        connection_handler_thread =\
+            threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
         self.handle_console_commands()
 
     def handle_incoming_connections(self):
-        print("[NODE] LISTENING TO INCOMING CONNECTIONS")
+        print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
         self.sock.listen(self.port)
 
         while True:
             conn, addr = self.sock.accept()
-            print('[NODE] CONNECTED WITH ', conn, ':', addr)
+            print("CONNECTED WITH {addr}")
             with conn:
 
                 # The first 2 bytes contain the amount of triplets in the message
                 length = struct.unpack('!H', conn.recv(2))[0]
-                print('[NODE] RECEIVED A MESSAGE WITH', length, 'TRIPLETS:')
+                print('RECEIVED A MESSAGE WITH', length, 'TRIPLETS:')
 
                 for i in range(0, length):
                     # Read the first 5 bytes, which contain the address and mask.
@@ -44,18 +50,23 @@ class TCPNode:
 
                     # Read the last 3 bytes (representing the cost), and interpret them as an int.
                     cost = int.from_bytes(conn.recv(3), byteorder='big', signed=False)
-                    print('[NODE] ADDRESS: ', triplets[0], '.', triplets[1], '.', triplets[2], '.', triplets[3],
+                    print('ADDRESS: ', triplets[0], '.', triplets[1], '.', triplets[2], '.', triplets[3],
                           ', SUBNET MASK: ', triplets[4], ', COST: ', cost, sep='')
 
     def send_message(self, ip, port, message):
-        print("[NODE] SENDING ", len(message), " BYTES TO ", ip, ":", port)
+        print("SENDING ", len(message), " BYTES TO ", ip, ":", port)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as host_socket:
             host_socket.connect((ip, port))
             host_socket.sendall(message)
 
     def handle_console_commands(self):
         while True:
-            command = input("[NODE] Enter your command...\n").strip().split(" ")
+            command = input("Enter your command...\n> ")
+            command = command.strip().split(" ")
+
+            if len(command) != 4:
+                print("Unrecognized command, try again.")
+
             if command[0] == "sendMessage":
                 message = self.read_message()
                 self.send_message(ip=command[1], port=int(command[2]), message=message)
@@ -67,7 +78,7 @@ class TCPNode:
         pass
 
     def read_message(self):
-        length = int(input("[NODE] Enter the length of your message...\n"))
+        length = int(input("Enter the length of your message...\n"))
 
         # The message will be 2 bytes (which represent the length) + the size of each triplet * the amount of triplets
         message = bytearray(2+length*self.TRIPLET_SIZE)
@@ -81,7 +92,7 @@ class TCPNode:
         # Then add 8 bytes per triplet (4 for IP, 1 for mask, 3 for cost)
         for i in range(0, length):
             current_message = \
-                input("[NODE] Type the message to be sent as follows:\n<IP address> <subnet mask> <cost>\n")\
+                input("Type the message to be sent as follows:\n<IP address> <subnet mask> <cost>\n")\
                 .strip().split(' ')
             address = current_message[0].strip().split('.')
 
@@ -102,3 +113,13 @@ class TCPNode:
             offset += self.TRIPLET_SIZE
 
         return message
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(sys.argv)
+        print(len(sys.argv))
+        print("Incorrect arg number")
+        sys.exit(1)
+
+    node = TCPNode(sys.argv[1], int(sys.argv[2]))
+    node.start_node()
