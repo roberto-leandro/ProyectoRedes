@@ -1,7 +1,7 @@
-# Copyright CARACORACLE
-
-import socket
 import threading
+import readline
+import socket
+import sys
 
 
 class TCPNode:
@@ -12,12 +12,17 @@ class TCPNode:
         self.routing_table = {}
         self.reachability_table = {}
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print("CONSTRUCTOR EXECUTED")
+        print("[PseudoBGP Node]")
+        print("Address: ", ip)
+        print("Port: ", port)
 
     def start_node(self):
-        """ Create two new threads, one to handle console commands and another to listen to incoming connections. """
+        """ Create two new threads
+        one to handle console commands and
+        another to listen to incoming connections. """
         print("START EXECUTED")
-        connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
+        connection_handler_thread =\
+            threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
         self.handle_console_commands()
 
@@ -33,7 +38,7 @@ class TCPNode:
                 data = conn.recv(1024)
                 if not data:
                     continue
-                print("[NODE] "+repr(data))
+                print("[NODE] ", repr(data))
 
         self.sock.close
 
@@ -45,7 +50,27 @@ class TCPNode:
 
     def handle_console_commands(self):
         while True:
-            command = input("[NODE] Enter your command...\n").strip().split(" ")
-            if command[0] == "sendMessage":
-                self.send_message(ip=command[1], port=int(command[2]), message=command[3])
+            command = input("[NODE] Enter your command...\n> ")
+            command = command.strip().split(" ")
 
+            if len(command) != 4:
+                print("Unrecognized command, try again.")
+
+            if command[0] == "sendMessage":
+                self.send_message(ip=command[1],
+                                  port=int(command[2]),
+                                  message=command[3])
+            else:
+                print("Unrecognized command, try again.")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(sys.argv)
+        print(len(sys.argv))
+        print("Incorrect arg number")
+        sys.exit(1)
+
+    print("Success!")
+    node = TCPNode(sys.argv[1], int(sys.argv[2]))
+    node.start_node()
