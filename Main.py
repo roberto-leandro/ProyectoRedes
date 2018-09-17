@@ -3,6 +3,14 @@ import subprocess
 import readline  # Nice input() handling
 import sys
 
+open_processes = {}
+
+intro_text = """\
+Available commands are
+    exit
+    createNode <intAs|pseudoBGP> <address> <port>
+"""
+
 
 def create_node(node_type, ip, port):
     if node_type == "intAs":
@@ -13,18 +21,29 @@ def create_node(node_type, ip, port):
         print("Unrecognized command, try again.")
         return
 
-    print(script_file)
+    process_key = (ip, port, node_type)
+    if process_key in open_processes:
+        if open_processes[process_key].poll() is None:
+            print(f"ERROR: A {node_type} node is already using {ip}:{port}")
+            return
+        else:
+            print(f"INFO: A {node_type} node was already using {ip}:{port},",
+                  "but was terminated")
+            open_processes.pop(process_key)
+
     node_process = subprocess.Popen(
         ["xterm", "-e", "python3", script_file, ip, str(port)])
-    print(node_process)
+    open_processes[process_key] = node_process
 
 
+print(intro_text)
 while True:
     # Read a command from the user
     command = input("[MAIN] Enter your command...\n> ").strip().split(" ")
 
     if len(command) == 1 and command[0] == "exit":
-        # TODO: close all the processes
+        for _, proc in open_processes.items():
+            proc.terminate()
         sys.exit(0)
 
     if len(command) != 4:

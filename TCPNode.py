@@ -13,8 +13,8 @@ class TCPNode:
         self.reachability_table = {}
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print("[PseudoBGP Node]")
-        print("Address: ", ip)
-        print("Port: ", port)
+        print("Address:", ip)
+        print("Port:", port)
 
     def start_node(self):
         """ Create two new threads
@@ -33,7 +33,7 @@ class TCPNode:
 
         while True:
             conn, addr = self.sock.accept()
-            print('CONNECTED WITH ', conn, ':', addr)
+            print(f"CONNECTED WITH {addr}")
             with conn:
                 data = conn.recv(1024)
                 if not data:
@@ -43,10 +43,10 @@ class TCPNode:
         self.sock.close
 
     def send_message(self, ip, port, message):
-        print("[NODE] SENDING ", message, " TO ", ip, ":", port)
+        print(f"[NODE] SENDING {message} TO {ip}:{port}")
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as host_socket:
             host_socket.connect((ip, port))
-            host_socket.sendall(b'Hello, world')
+            host_socket.sendall(message.encode())
 
     def handle_console_commands(self):
         while True:
@@ -71,6 +71,5 @@ if __name__ == "__main__":
         print("Incorrect arg number")
         sys.exit(1)
 
-    print("Success!")
     node = TCPNode(sys.argv[1], int(sys.argv[2]))
     node.start_node()
