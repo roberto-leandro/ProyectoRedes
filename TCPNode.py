@@ -23,9 +23,27 @@ class TCPNode:
     def handle_incoming_connections(self):
         print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
+        self.sock.listen(self.port)
+
+        while True:
+            conn, addr = self.sock.accept()
+            print('CONNECTED WITH ' + conn[0] + ':' + str(addr[1]))
+            with conn:
+                data = conn.recv(1024)
+                if not data:
+                    continue
+                print(repr(data))
+
+        self.sock.close
+
+    def send_message(self, ip, port, message):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as host_socket:
+            host_socket.connect((ip, port))
+            host_socket.sendall(b'Hello, world')
 
     def handle_console_commands(self):
-        while True:
-            command = input("Enter your command...\n").strip()
-            print(command)
+        # while True:
+            command = input("[NODE] Enter your command...\n").strip()
+            if command[0] == "sendMessage":
+                self.send_message(ip=command[1],port=int(command[2]),message=command[3])
 

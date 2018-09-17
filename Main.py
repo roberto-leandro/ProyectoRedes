@@ -13,10 +13,9 @@ def create_node(node_type, ip, port):
         return
     node_process = Process(target=node.start_node())
 
-
 while True:
     # Read a command from the user
-    command = input("Enter your command...\n").strip().split(" ")
+    command = input("[MAIN] Enter your command...\n").strip().split(" ")
 
     if len(command) != 4:
         print("No sea idiota")
@@ -24,7 +23,7 @@ while True:
 
     if command[0] == "createNode":
         # Create new process to execute this node
-        create_node(node_type=command[1], ip=command[2], port=command[3])
+        create_node(node_type=command[1], ip=command[2], port=int(command[3]))
 
 
 
