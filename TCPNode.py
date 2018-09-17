@@ -18,7 +18,7 @@ class TCPNode:
         """ Create two new threads, one to handle console commands and another to listen to incoming connections. """
         print("START EXECUTED")
         connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
-        self.handle_console_commands()git clone
+        self.handle_console_commands()
 
     def handle_incoming_connections(self):
         print("LISTENING TO INCOMING CONNECTIONS")
