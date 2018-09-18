@@ -24,10 +24,10 @@ def create_node(node_type, ip, port):
     process_key = (ip, port, node_type)
     if process_key in open_processes:
         if open_processes[process_key].poll() is None:
-            print(f"ERROR: A {node_type} node is already using {ip}:{port}")
+            print("ERROR: A {node_type} node is already using {ip}:{port}")
             return
         else:
-            print(f"INFO: A {node_type} node was already using {ip}:{port},",
+            print("INFO: A {node_type} node was already using {ip}:{port},",
                   "but was terminated")
             open_processes.pop(process_key)
 
