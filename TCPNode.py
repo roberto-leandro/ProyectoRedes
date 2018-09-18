@@ -57,6 +57,7 @@ class TCPNode:
                 # A socket disconnection may throw a non defined exception
                 # this will catch all exceptions and blame it in a
                 # socket disconnecting abruptly
+                connection.close()
                 print("A connection was closed")
                 return  # stop the thread not-so gracefully
 
@@ -86,7 +87,8 @@ class TCPNode:
 
         try:
             host_socket.sendall(message)
-        except Exception:
+        except BrokenPipeError:
+            self.connections[address].close()
             del self.connections[address]
             print(f"Conection with {address} closed")
 
