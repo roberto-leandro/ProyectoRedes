@@ -5,21 +5,9 @@ import sys
 
 
 class UDPNode:
-    def __init__(self, ip, port):
-        self.port = port
-        self.ip = ip
-        self.reachability_table = {}
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        print("[IntAS Node]")
-        print("Address:", ip)
-        print("Port:", port)
+    SOCKET_TYPE = socket.SOCK_DGRAM
+    NODE_TYPE_STRING = "[IntAS Node]"
 
-    def start_node(self):
-        print("START EXECUTED")
-        connection_handler_thread =\
-            threading.Thread(target=self.handle_incoming_connections)
-        connection_handler_thread.start()
-        self.handle_console_commands()
 
     def handle_incoming_connections(self):
         print("LISTENING TO INCOMING CONNECTIONS")
