@@ -10,9 +10,9 @@ class TCPNode:
     TRIPLET_SIZE = 8
 
     def __init__(self, ip, port):
-        self.port = port
         self.ip = ip
-        self.routing_table = {}
+        self.port = port
+        self.connections = {}
         self.reachability_table = {}
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print("[PseudoBGP Node]")
@@ -36,7 +36,7 @@ class TCPNode:
         length = struct.unpack('!H', header)[0]
         print(f"RECEIVED A MESSAGE WITH {length} TRIPLETS:")
 
-        for i in range(0, length):
+        for _ in range(0, length):
             # Read each triplet
             message = connection.recv(TCPNode.TRIPLET_SIZE)
             triplet = struct.unpack('!BBBBBBBB', message)
@@ -48,6 +48,18 @@ class TCPNode:
             print(f"ADDRESS: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]}",
                   f", SUBNET MASK: {mask}, COST: {cost}")
 
+    @staticmethod
+    def listen_to_connection(connection):
+        while True:
+            try:
+                TCPNode.receive_and_decode_message(connection)
+            except Exception:
+                # A socket disconnection may throw a non defined exception
+                # this will catch all exceptions and blame it in a
+                # socket disconnecting abruptly
+                print("A connection was closed")
+                return  # stop the thread not-so gracefully
+
     def handle_incoming_connections(self):
         print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
@@ -55,23 +67,37 @@ class TCPNode:
 
         while True:
             conn, addr = self.sock.accept()
-            print("CONNECTED WITH {addr}")
-            with conn:
-                TCPNode.receive_and_decode_message(conn)
+            print(f"CONNECTED WITH {addr}")
+            connection_listener = \
+                threading.Thread(
+                    target=self.listen_to_connection,
+                    args=(conn,))
+            connection_listener.start()
 
     def send_message(self, ip, port, message):
-        print("SENDING ", len(message), " BYTES TO ", ip, ":", port)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as host_socket:
-            host_socket.connect((ip, port))
+        print(f"SENDING {len(message)} BYTES TO {ip}:{port}")
+        address = (ip, port)
+        if address in self.connections:
+            host_socket = self.connections[address]
+        else:
+            host_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            host_socket.connect(address)
+            self.connections[address] = host_socket
+
+        try:
             host_socket.sendall(message)
+        except Exception:
+            del self.connections[address]
+            print(f"Conection with {address} closed")
 
     def handle_console_commands(self):
         while True:
             command = input("Enter your command...\n> ")
             command = command.strip().split(" ")
 
-            if len(command) != 4:
+            if len(command) != 3:
                 print("Unrecognized command, try again.")
+                continue
 
             if command[0] == "sendMessage":
                 message = self.read_message()
@@ -92,7 +118,7 @@ class TCPNode:
         struct.pack_into("!H", message, 0, length)
 
         offset = 2
-        for i in range(0, length):
+        for _ in range(0, length):
             current_message = \
                 input("Type the message to be sent as follows:\n" +
                       "<IP address> <subnet mask> <cost>\n")
