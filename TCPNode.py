@@ -96,6 +96,8 @@ class TCPNode(AbstractNode):
 
         # Close all the connections that had been opened
         for connection in self.connections.values():
+            # send stop message
+            connection.send_message(struct.pack("!H", 0))
             connection.close()
 
 
