@@ -1,43 +1,42 @@
-import threading
-import readline
+import struct
 import socket
 import sys
+from AbstractNode import AbstractNode
 
 
-class UDPNode:
+class UDPNode(AbstractNode):
     SOCKET_TYPE = socket.SOCK_DGRAM
     NODE_TYPE_STRING = "[IntAS Node]"
-
+    BUFFER_SIZE = 2048  # Will be used when reading from a socket
 
     def handle_incoming_connections(self):
         print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
 
         while True:
-            message, addr = self.sock.recvfrom(1024)
-            print(f"MESSAGE FROM {addr}")
-            print(f"[NODE] {message}")
+            message = self.receive_message(self.sock)
+            self.decode_message(message)
+
+    def receive_message(self, connection):
+        # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
+        message, address = connection.recvfrom(self.BUFFER_SIZE)
+        print(f"CONNECTED WITH {address}")
+
+        # Get the header, located in the first 2 bytes
+        triplet_count = struct.unpack('!H', message[0:2])[0]
+        print(f"RECEIVED A MESSAGE WITH {triplet_count} TRIPLETS.")
+
+        # Return a buffer with only the triplets, omitting the header
+        return message[2:]
 
     def send_message(self, ip, port, message):
-        print(f"[NODE] SENDING {message} TO {ip}:{port}")
-        self.sock.settimeout(1.0)
-        addr = (ip, port)
-        self.sock.sendto(message.encode(), addr)
+        print(f"SENDING {len(message)} BYTES TO {ip}:{port}")
+        self.sock.sendto(message, (ip, port))
 
-    def handle_console_commands(self):
-        while True:
-            command = input("[NODE] Enter your command...\n> ")
-            command = command.strip().split(" ")
-
-            if len(command) != 4:
-                print("Unrecognized command, try again.")
-
-            if command[0] == "sendMessage":
-                self.send_message(ip=command[1],
-                                  port=int(command[2]),
-                                  message=command[3])
-            else:
-                print("Unrecognized command, try again.")
+    def stop_node(self):
+        # TODO
+        # Close open connection and terminate all threads
+        sys.exit()
 
 
 if __name__ == "__main__":
