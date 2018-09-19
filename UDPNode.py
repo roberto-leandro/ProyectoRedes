@@ -14,8 +14,14 @@ class UDPNode(AbstractNode):
         self.sock.bind((self.ip, self.port))
 
         while not self.stopper.is_set():
-            message = self.receive_message(self.sock)
-            self.decode_message(message)
+            message, address = self.receive_message(self.sock)
+            self.decode_message(message, address)
+
+    def disconnect_address(self, address):
+        for key, value in self.reachability_table:
+            if value[0] == address:
+                del self.reachability_table[key]
+        print(f"Deleting {address} table entries")
 
     def receive_message(self, connection):
         # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
@@ -26,8 +32,12 @@ class UDPNode(AbstractNode):
         triplet_count = struct.unpack('!H', message[0:2])[0]
         print(f"RECEIVED A MESSAGE WITH {triplet_count} TRIPLETS.")
 
+        if triplet_count == 0:
+            disconnect_address(address)
+            return ([], "")
+
         # Return a buffer with only the triplets, omitting the header
-        return message[2:]
+        return (message[2:], address)
 
     def send_message(self, ip, port, message):
         print(f"SENDING {len(message)} BYTES TO {ip}:{port}")

@@ -63,7 +63,7 @@ class AbstractNode(ABC):
                 print("Unrecognized command, try again.")
         print("console handler died")
 
-    def decode_message(self, message):
+    def decode_message(self, message, address):
         offset = 0
         while offset < len(message):
             # Unpack the binary
@@ -83,8 +83,8 @@ class AbstractNode(ABC):
             self.reachability_table_lock.acquire()
 
             if (ip, mask) not in self.reachability_table or \
-               self.reachability_table[(ip, mask)] > cost:
-                self.reachability_table[(ip, mask)] = cost
+               self.reachability_table[(ip, mask)][1] > cost:
+                self.reachability_table[(ip, mask)] = (address, cost)
 
             self.reachability_table_lock.release()
 
@@ -133,7 +133,8 @@ class AbstractNode(ABC):
 
         else:
             for (ip, mask), cost in self.reachability_table.items():
-                print(f"Address: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]}, mask: {mask}, cost: {cost}.")
+                print(f"Address: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]},",
+                      f"mask: {mask}, cost: {cost}.")
 
         self.reachability_table_lock.release()
 
@@ -150,7 +151,7 @@ class AbstractNode(ABC):
 
     # Each protocol uses a different method in the socket to read data.
     @abstractmethod
-    def receive_message(self, connection):
+    def receive_message(self, connection, address):
         pass
 
     # TCPNodes need to close all their sockets, as opposed to UDPNodes.

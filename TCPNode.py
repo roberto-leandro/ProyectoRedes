@@ -10,24 +10,25 @@ class TCPNode(AbstractNode):
     NODE_TYPE_STRING = "[PseudoBGP Node]"
 
     def __init__(self, ip, port):
-        super.__init__(ip, port):
+        super().__init__(ip, port)
         self.connections = {}
 
     def handle_connection(self, connection, address):
         print("Connected to:", address)
         while not self.stopper.is_set():
             try:
-                message = self.receive_message(connection)
-                self.decode_message(message)
+               message = self.receive_message(connection, address)
+               self.decode_message(message, address)
 
             except Exception:
                 # A socket disconnection may throw a non defined exception
                 # this will catch all exceptions and blame it in a
                 # socket disconnecting abruptly
                 connection.close()
+                self.disconnect_address(address)
                 print(f"The connection with {address} was closed.")
                 print("worker thread died")
-                return  # stop the thread not-so gracefully
+                return
         print("worker thread died")
         connection.close()
 
@@ -45,10 +46,25 @@ class TCPNode(AbstractNode):
         self.sock.close()
         print("maker of threads died")
 
-    def receive_message(self, connection):
+    def disconnect_address(self, address):
+        if address in self.connections:
+            del self.connections[address]
+
+        for key, value in self.reachability_table:
+            if value[0] == address:
+                del self.reachability_table[key]
+
+        print(f"Disconnected from {address}")
+        print(f"Deleting {address} table entries")
+
+    def receive_message(self, connection, address):
         # Header is the first 2 bytes, it contains the length
         header = connection.recv(2)
         triplet_count = struct.unpack('!H', header)[0]
+
+        if triplet_count == 0:
+            return []
+
         print(f"RECEIVED A MESSAGE WITH {triplet_count} TRIPLETS.")
         return connection.recv(self.TRIPLET_SIZE*triplet_count)
 
