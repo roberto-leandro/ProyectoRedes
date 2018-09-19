@@ -24,7 +24,6 @@ class TCPNode(AbstractNode):
                 # A socket disconnection may throw a non defined exception
                 # this will catch all exceptions and blame it in a
                 # socket disconnecting abruptly
-                connection.close()
                 self.disconnect_address(address)
                 print(f"The connection with {address} was closed.")
                 print("worker thread died")

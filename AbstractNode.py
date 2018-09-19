@@ -99,7 +99,37 @@ class AbstractNode(ABC):
             current_message = input("Type the message to be sent as follows:\n" +
                                     "<IP address> <subnet mask> <cost>\n")
             current_message = current_message.strip().split(' ')
+
+            # keep trying for a good message
+            while len(current_message) != 3:
+                print("Invalid message")
+                current_message = input("<IP address> <subnet mask> <cost>\n")
+                current_message = current_message.strip().split(' ')
+
             address = current_message[0].strip().split('.')
+
+            while len(address) != 4:
+                print("Invalid message")
+                current_message = input("<IP address> <subnet mask> <cost>\n")
+                current_message = current_message.strip().split(' ')
+                address = current_message[0].strip().split('.')
+
+            invalid_address_nums = [int(s) for s in address if int(s) > 127]
+            is_address_valid = len(invalid_address_nums) == 0
+            is_subnet_mask_valid = int(current_message[1]) < 32
+            is_cost_valid = int(current_message[2]) < 0xFFFFFF
+            is_input_valid = is_address_valid and is_cost_valid and is_subnet_mask_valid
+
+            while not is_input_valid:
+                print("Invalid message")
+                current_message = input("<IP address> <subnet mask> <cost>\n")
+                current_message = current_message.strip().split(' ')
+                address = current_message[0].strip().split('.')
+                invalid_address_nums = [int(s) for s in address if int(s) > 127]
+                is_address_valid = len(invalid_address_nums) == 0
+                is_subnet_mask_valid = int(current_message[1]) < 32
+                is_cost_valid = int(current_message[2]) < 0xFFFFFF
+                is_input_valid = is_address_valid and is_cost_valid and is_subnet_mask_valid
 
             # Each triplet is encoded with the following 8-byte format:
             # BBBB (4 bytes) network address
