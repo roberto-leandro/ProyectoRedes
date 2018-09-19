@@ -113,7 +113,7 @@ class AbstractNode(ABC):
                 current_message = current_message.strip().split(' ')
                 address = current_message[0].strip().split('.')
 
-            invalid_address_nums = [int(s) for s in address if int(s) > 127]
+            invalid_address_nums = [int(s) for s in address if int(s) > 255]
             is_address_valid = len(invalid_address_nums) == 0
             is_subnet_mask_valid = int(current_message[1]) < 32
             is_cost_valid = int(current_message[2]) < 0xFFFFFF
@@ -124,7 +124,7 @@ class AbstractNode(ABC):
                 current_message = input("<IP address> <subnet mask> <cost>\n")
                 current_message = current_message.strip().split(' ')
                 address = current_message[0].strip().split('.')
-                invalid_address_nums = [int(s) for s in address if int(s) > 127]
+                invalid_address_nums = [int(s) for s in address if int(s) > 255]
                 is_address_valid = len(invalid_address_nums) == 0
                 is_subnet_mask_valid = int(current_message[1]) < 32
                 is_cost_valid = int(current_message[2]) < 0xFFFFFF
