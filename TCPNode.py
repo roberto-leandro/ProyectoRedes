@@ -48,11 +48,14 @@ class TCPNode(AbstractNode):
 
     def disconnect_address(self, address):
         if address in self.connections:
+            self.connections[address].close()
             del self.connections[address]
 
+        self.reachability_table_lock.acquire()
         for key, value in self.reachability_table:
             if value[0] == address:
                 del self.reachability_table[key]
+        self.reachability_table_lock.release()
 
         print(f"Disconnected from {address}")
         print(f"Deleting {address} table entries")
@@ -63,6 +66,7 @@ class TCPNode(AbstractNode):
         triplet_count = struct.unpack('!H', header)[0]
 
         if triplet_count == 0:
+            self.disconnect_address(address)
             return []
 
         print(f"RECEIVED A MESSAGE WITH {triplet_count} TRIPLETS.")
