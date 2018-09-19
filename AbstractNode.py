@@ -9,13 +9,18 @@ from abc import ABC, abstractmethod
 class AbstractNode(ABC):
     HEADER_SIZE = 2
     TRIPLET_SIZE = 8
-    SOCKET_TYPE = None 	     # Defined in the subclasses
-    NODE_TYPE_STRING = None  # Defined in the subclasses
+
+    # Defined in the subclasses
+    SOCKET_TYPE = None
+    NODE_TYPE_STRING = None
 
     def __init__(self, ip, port):
         self.port = port
         self.ip = ip
         self.reachability_table = {}
+        # Controls access to the shared table
+        self.reachability_table_lock = threading.Lock()
+        self.connections = {}
         self.sock = socket.socket(socket.AF_INET, self.SOCKET_TYPE)
         print(self.NODE_TYPE_STRING)
         print(f"Address: {ip}")
@@ -25,7 +30,6 @@ class AbstractNode(ABC):
         """ Create two new threads
         one to handle console commands and
         another to listen to incoming connections. """
-        print("START EXECUTED")
         connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
         self.handle_console_commands()
@@ -46,6 +50,9 @@ class AbstractNode(ABC):
             elif command[0] == "exit" or command[0] == "deleteNode":
                 self.stop_node()
 
+            elif command[0] == "printTable":
+                self.print_reachability_table()
+
             else:
                 print("Unrecognized command, try again.")
 
@@ -62,6 +69,14 @@ class AbstractNode(ABC):
 
             offset += self.TRIPLET_SIZE
             print(f"ADDRESS: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]}", f", SUBNET MASK: {mask}, COST: {cost}")
+
+            # Write to the reachability table, as many threads may perform read/write we need to lock it
+            self.reachability_table_lock.acquire()
+
+            if (ip, mask) not in self.reachability_table or self.reachability_table[(ip, mask)] > cost:
+                self.reachability_table[(ip, mask)] = cost
+
+            self.reachability_table_lock.release()
 
     def read_and_encode_message(self):
         length = int(input("Enter the length of your message...\n"))
@@ -97,6 +112,19 @@ class AbstractNode(ABC):
             offset += self.TRIPLET_SIZE
 
         return message
+
+    def print_reachability_table(self):
+        print("Current reachability table:")
+        self.reachability_table_lock.acquire()
+
+        if not self.reachability_table:
+            print("The reachability table is empty.")
+
+        else:
+            for (ip, mask), cost in self.reachability_table.items():
+                print(f"Address: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]}, mask: {mask}, cost: {cost}.")
+
+        self.reachability_table_lock.release()
 
     # TCPNodes should store the connection, UDPNodes discard it after receiving data.
     @abstractmethod
