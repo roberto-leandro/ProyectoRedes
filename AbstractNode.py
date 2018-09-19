@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 class AbstractNode(ABC):
     HEADER_SIZE = 2
     TRIPLET_SIZE = 8
+    SOCKET_TIMEOUT = 5.0
 
     # Defined in the subclasses
     SOCKET_TYPE = None
@@ -22,6 +23,9 @@ class AbstractNode(ABC):
         self.reachability_table_lock = threading.Lock()
         self.connections = {}
         self.sock = socket.socket(socket.AF_INET, self.SOCKET_TYPE)
+
+        # Will be set to False when the node should be deleted
+        self.continue_execution = True
         print(self.NODE_TYPE_STRING)
         print(f"Address: {ip}")
         print(f"Port: {port}")
@@ -36,7 +40,7 @@ class AbstractNode(ABC):
 
     def handle_console_commands(self):
         print("Available commands are:\n    sendMessage <address> <por>\n    deleteNode\n")
-        while True:
+        while self.continue_execution:
             command = input("Enter your command...\n> ")
             command = command.strip().split(" ")
 

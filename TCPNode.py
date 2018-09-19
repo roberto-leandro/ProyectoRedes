@@ -9,8 +9,9 @@ class TCPNode(AbstractNode):
     SOCKET_TYPE = socket.SOCK_STREAM
     NODE_TYPE_STRING = "[PseudoBGP Node]"
 
-    def handle_connection(self, connection):
-        while True:
+    def handle_connection(self, connection, address):
+        print("Connected to:", address)
+        while self.continue_execution:
             try:
                 message = self.receive_message(connection)
                 self.decode_message(message)
@@ -20,22 +21,21 @@ class TCPNode(AbstractNode):
                 # this will catch all exceptions and blame it in a
                 # socket disconnecting abruptly
                 connection.close()
-                print("A connection was closed")
+                print(f"The connection with {address} was closed.")
                 return  # stop the thread not-so gracefully
+
+        connection.close()
 
     def handle_incoming_connections(self):
         print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
         self.sock.listen(self.port)
 
-        while True:
-            connection, address = self.sock.accept()
-            print(f"CONNECTED WITH {address}")
-            connection_listener = \
-                threading.Thread(
-                    target=self.handle_connection,
-                    args=(connection,))
-            connection_listener.start()
+        while self.continue_execution:
+            connection_handler = threading.Thread(target=self.handle_connection, args=(self.sock.accept()))
+            connection_handler.start()
+
+        self.sock.close()
 
     def receive_message(self, connection):
         # Header is the first 2 bytes, it contains the length
@@ -45,12 +45,14 @@ class TCPNode(AbstractNode):
         return connection.recv(self.TRIPLET_SIZE*triplet_count)
 
     def send_message(self, ip, port, message):
-        print(f"SENDING {len(message)} BYTES TO {ip}:{port}")
         address = (ip, port)
+        print(f"SENDING {len(message)} BYTES TO {ip}:{port} to {address}")
+
         if address in self.connections:
             destination_socket = self.connections[address]
         else:
             destination_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            destination_socket.settimeout(self.SOCKET_TIMEOUT)
             destination_socket.connect(address)
             self.connections[address] = destination_socket
 
@@ -59,12 +61,17 @@ class TCPNode(AbstractNode):
         except BrokenPipeError:
             self.connections[address].close()
             del self.connections[address]
-            print(f"Connection with {address} closed.")
+            print(f"Connection with {address} was closed.")
 
     def stop_node(self):
-        # TODO
-        # Close all open connections and terminate all threads
-        sys.exit()
+        print("Deleting node...")
+
+        # Set this flag to false, stopping all loops
+        self.continue_execution = False
+
+        # Close all the connections that had been opened
+        for connection in self.connections.values():
+            connection.close()
 
 
 if __name__ == "__main__":
@@ -76,3 +83,5 @@ if __name__ == "__main__":
 
     node = TCPNode(sys.argv[1], int(sys.argv[2]))
     node.start_node()
+
+sys.exit(0)
