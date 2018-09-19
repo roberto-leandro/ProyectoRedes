@@ -13,7 +13,7 @@ class UDPNode(AbstractNode):
         print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
 
-        while self.continue_execution:
+        while not self.stopper.is_set():
             message = self.receive_message(self.sock)
             self.decode_message(message)
 
@@ -37,7 +37,7 @@ class UDPNode(AbstractNode):
         print("Deleting node...")
 
         # Set this flag to false, stopping all loops
-        self.continue_execution = False
+        self.stopper.set()
 
 
 if __name__ == "__main__":

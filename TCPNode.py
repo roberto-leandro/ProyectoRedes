@@ -11,7 +11,7 @@ class TCPNode(AbstractNode):
 
     def handle_connection(self, connection, address):
         print("Connected to:", address)
-        while self.continue_execution:
+        while not self.stopper.is_set():
             try:
                 message = self.receive_message(connection)
                 self.decode_message(message)
@@ -22,8 +22,9 @@ class TCPNode(AbstractNode):
                 # socket disconnecting abruptly
                 connection.close()
                 print(f"The connection with {address} was closed.")
+                print("worker thread died")
                 return  # stop the thread not-so gracefully
-
+        print("worker thread died")
         connection.close()
 
     def handle_incoming_connections(self):
@@ -31,11 +32,12 @@ class TCPNode(AbstractNode):
         self.sock.bind((self.ip, self.port))
         self.sock.listen(self.port)
 
-        while self.continue_execution:
+        while not self.stopper.is_set():
             connection_handler = threading.Thread(target=self.handle_connection, args=(self.sock.accept()))
             connection_handler.start()
 
         self.sock.close()
+        print("maker of threads died")
 
     def receive_message(self, connection):
         # Header is the first 2 bytes, it contains the length
@@ -67,7 +69,7 @@ class TCPNode(AbstractNode):
         print("Deleting node...")
 
         # Set this flag to false, stopping all loops
-        self.continue_execution = False
+        self.stopper.set()
 
         # Close all the connections that had been opened
         for connection in self.connections.values():

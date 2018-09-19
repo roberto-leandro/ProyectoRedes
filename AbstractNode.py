@@ -24,8 +24,8 @@ class AbstractNode(ABC):
         self.connections = {}
         self.sock = socket.socket(socket.AF_INET, self.SOCKET_TYPE)
 
-        # Will be set to False when the node should be deleted
-        self.continue_execution = True
+        # Will be set when the node should be deleted
+        self.stopper = threading.Event()
         print(self.NODE_TYPE_STRING)
         print(f"Address: {ip}")
         print(f"Port: {port}")
@@ -40,7 +40,7 @@ class AbstractNode(ABC):
 
     def handle_console_commands(self):
         print("Available commands are:\n    sendMessage <address> <por>\n    deleteNode\n")
-        while self.continue_execution:
+        while not self.stopper.is_set():
             command = input("Enter your command...\n> ")
             command = command.strip().split(" ")
 
@@ -59,6 +59,7 @@ class AbstractNode(ABC):
 
             else:
                 print("Unrecognized command, try again.")
+        print("console handler died")
 
     def decode_message(self, message):
         offset = 0
