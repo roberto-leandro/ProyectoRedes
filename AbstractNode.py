@@ -61,7 +61,6 @@ class AbstractNode(ABC):
 
             else:
                 print("Unrecognized command, try again.")
-        print("console handler died")
 
     def decode_message(self, message, address):
         offset = 0

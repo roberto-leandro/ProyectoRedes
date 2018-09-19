@@ -28,7 +28,6 @@ class TCPNode(AbstractNode):
                 print(f"The connection with {address} was closed.")
                 print("worker thread died")
                 return
-        print("worker thread died")
         connection.close()
 
     def handle_incoming_connections(self):
@@ -43,7 +42,6 @@ class TCPNode(AbstractNode):
             connection_handler.start()
 
         self.sock.close()
-        print("maker of threads died")
 
     def disconnect_address(self, address):
         if address in self.connections:
