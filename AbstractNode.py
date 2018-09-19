@@ -21,7 +21,6 @@ class AbstractNode(ABC):
         self.reachability_table = {}
         # Controls access to the shared table
         self.reachability_table_lock = threading.Lock()
-        self.connections = {}
         self.sock = socket.socket(socket.AF_INET, self.SOCKET_TYPE)
 
         # Will be set when the node should be deleted
@@ -34,12 +33,15 @@ class AbstractNode(ABC):
         """ Create two new threads
         one to handle console commands and
         another to listen to incoming connections. """
-        connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
+        connection_handler_thread = \
+            threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
         self.handle_console_commands()
 
     def handle_console_commands(self):
-        print("Available commands are:\n    sendMessage <address> <por>\n    deleteNode\n")
+        print("Available commands are:")
+        print("    sendMessage <address> <port>")
+        print("    deleteNode")
         while not self.stopper.is_set():
             command = input("Enter your command...\n> ")
             command = command.strip().split(" ")
@@ -73,12 +75,15 @@ class AbstractNode(ABC):
             cost = int.from_bytes(triplet[5:], byteorder='big', signed=False)
 
             offset += self.TRIPLET_SIZE
-            print(f"ADDRESS: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]}", f", SUBNET MASK: {mask}, COST: {cost}")
+            print(f"ADDRESS: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]}",
+                  f", SUBNET MASK: {mask}, COST: {cost}")
 
-            # Write to the reachability table, as many threads may perform read/write we need to lock it
+            # Write to the reachability table,
+            # as many threads may perform read/write we need to lock it
             self.reachability_table_lock.acquire()
 
-            if (ip, mask) not in self.reachability_table or self.reachability_table[(ip, mask)] > cost:
+            if (ip, mask) not in self.reachability_table or \
+               self.reachability_table[(ip, mask)] > cost:
                 self.reachability_table[(ip, mask)] = cost
 
             self.reachability_table_lock.release()
@@ -91,7 +96,8 @@ class AbstractNode(ABC):
 
         offset = 2
         for _ in range(0, length):
-            current_message = input("Type the message to be sent as follows:\n" + "<IP address> <subnet mask> <cost>\n")
+            current_message = input("Type the message to be sent as follows:\n" +
+                                    "<IP address> <subnet mask> <cost>\n")
             current_message = current_message.strip().split(' ')
             address = current_message[0].strip().split('.')
 
@@ -136,7 +142,8 @@ class AbstractNode(ABC):
     def handle_incoming_connections(self):
         pass
 
-    # TCPNodes should try to use an existing connection whenever possible, UDPNodes should create a new connection.
+    # TCPNodes should try to use an existing connection whenever possible,
+    # UDPNodes should create a new connection.
     @abstractmethod
     def send_message(self, ip, port, message):
         pass

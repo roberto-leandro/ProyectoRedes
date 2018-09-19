@@ -9,6 +9,10 @@ class TCPNode(AbstractNode):
     SOCKET_TYPE = socket.SOCK_STREAM
     NODE_TYPE_STRING = "[PseudoBGP Node]"
 
+    def __init__(self, ip, port):
+        super.__init__(ip, port):
+        self.connections = {}
+
     def handle_connection(self, connection, address):
         print("Connected to:", address)
         while not self.stopper.is_set():
@@ -33,7 +37,9 @@ class TCPNode(AbstractNode):
         self.sock.listen(self.port)
 
         while not self.stopper.is_set():
-            connection_handler = threading.Thread(target=self.handle_connection, args=(self.sock.accept()))
+            connection_handler = \
+                threading.Thread(target=self.handle_connection,
+                                 args=(self.sock.accept()))
             connection_handler.start()
 
         self.sock.close()
