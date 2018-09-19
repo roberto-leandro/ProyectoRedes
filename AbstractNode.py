@@ -70,7 +70,7 @@ class AbstractNode(ABC):
         struct.pack_into("!H", message, 0, length)
 
         offset = 2
-        for i in range(0, length):
+        for _ in range(0, length):
             current_message = input("Type the message to be sent as follows:\n" + "<IP address> <subnet mask> <cost>\n")
             current_message = current_message.strip().split(' ')
             address = current_message[0].strip().split('.')

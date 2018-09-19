@@ -47,4 +47,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     node = TCPNode(sys.argv[1], int(sys.argv[2]))
+    node.connections = {}
     node.start_node()
