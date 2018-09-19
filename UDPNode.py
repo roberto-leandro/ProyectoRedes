@@ -33,7 +33,7 @@ class UDPNode(AbstractNode):
         print(f"RECEIVED A MESSAGE WITH {triplet_count} TRIPLETS.")
 
         if triplet_count == 0:
-            disconnect_address(address)
+            self.disconnect_address(address)
             return ([], "")
 
         # Return a buffer with only the triplets, omitting the header
