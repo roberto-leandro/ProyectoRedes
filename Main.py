@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import subprocess
-import readline  # Nice input() handling
 import sys
+
+if "readline" in sys.modules:
+    import readline  # Nice input() handling
 
 open_processes = {}
 
@@ -10,6 +12,19 @@ Available commands are
     exit
     createNode <intAs|pseudoBGP> <address> <port>
 """
+
+if sys.platform in ["linux2", "linux"]:
+    def spawn_terminal(file, ip, port):
+        return subprocess.Popen(["xterm", "-e", sys.executable, file, ip, port])
+elif sys.platform in ["win32", "cygwin"]:
+    def spawn_terminal(file, ip, port):
+        return subprocess.Popen([sys.executable, file, ip, port],
+                                creationflags=subprocess.CREATE_NEW_CONSOLE)
+else:
+    print("Unsupported OS")
+
+    def spawn_terminal(file, ip, port):
+        return None
 
 
 def create_node(node_type, ip, port):
@@ -31,8 +46,7 @@ def create_node(node_type, ip, port):
                   "but was terminated")
             open_processes.pop(process_key)
 
-    node_process = subprocess.Popen(
-        ["xterm", "-e", "python3", script_file, ip, str(port)])
+    node_process = spawn_terminal(script_file, ip, str(port))
     open_processes[process_key] = node_process
 
 

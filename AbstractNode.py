@@ -1,9 +1,11 @@
 import threading
 import struct
 import sys
-import readline
 import socket
 from abc import ABC, abstractmethod
+
+if "readline" in sys.modules:
+    import readline
 
 
 class AbstractNode(ABC):
