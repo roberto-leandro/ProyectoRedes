@@ -88,7 +88,14 @@ class AbstractNode(ABC):
             self.reachability_table_lock.release()
 
     def read_and_encode_message(self):
-        length = int(input("Enter the length of your message...\n"))
+        length = 0
+        while not length > 0:
+            try:
+                length = int(input("Enter the length of your message...\n"))
+
+            except ValueError:
+                print("Please enter a valid integer.")
+
         message = bytearray(2 + length*self.TRIPLET_SIZE)
         # First encode 2 bytes that represents the message length
         struct.pack_into("!H", message, 0, length)
