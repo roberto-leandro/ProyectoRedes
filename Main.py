@@ -2,8 +2,11 @@
 import subprocess
 import sys
 
-if "readline" in sys.modules:
-    import readline  # Nice input() handling
+try:
+    # Nice input() handling
+    import readline
+except ImportError:
+    pass
 
 open_processes = {}
 
@@ -15,7 +18,8 @@ Available commands are
 
 if sys.platform in ["linux2", "linux"]:
     def spawn_terminal(file, ip, port):
-        return subprocess.Popen(["xterm", "-e", sys.executable, file, ip, port])
+        return subprocess.Popen(
+            ["xterm", "-e", sys.executable, file, ip, port])
 elif sys.platform in ["win32", "cygwin"]:
     def spawn_terminal(file, ip, port):
         return subprocess.Popen([sys.executable, file, ip, port],

@@ -4,8 +4,10 @@ import sys
 import socket
 from abc import ABC, abstractmethod
 
-if "readline" in sys.modules:
+try:
     import readline
+except ImportError:
+    pass
 
 
 class AbstractNode(ABC):
