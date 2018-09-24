@@ -16,18 +16,14 @@ class TCPNode(AbstractNode):
     def handle_connection(self, connection, address):
         print("Connected to:", address)
         while not self.stopper.is_set():
+            self.connections[address] = connection
             try:
-               message = self.receive_message(connection, address)
-               self.decode_message(message, address)
-
-            except Exception:
-                # A socket disconnection may throw a non defined exception
-                # this will catch all exceptions and blame it in a
-                # socket disconnecting abruptly
+                message = self.receive_message(connection, address)
+            except OSError:
                 self.disconnect_address(address)
-                print(f"The connection with {address} was closed.")
-                print("worker thread died")
+                print(f"Connection with address: {address} has disconnected")
                 return
+            self.decode_message(message, address)
         connection.close()
 
     def handle_incoming_connections(self):
@@ -36,22 +32,30 @@ class TCPNode(AbstractNode):
         self.sock.listen(self.port)
 
         while not self.stopper.is_set():
-            connection_handler = \
-                threading.Thread(target=self.handle_connection,
-                                 args=(self.sock.accept()))
-            connection_handler.start()
-
-        self.sock.close()
+            try:
+                connection_handler = \
+                    threading.Thread(target=self.handle_connection,
+                                     args=(self.sock.accept()))
+                connection_handler.start()
+            except OSError:
+                print("Main socket has closed")
 
     def disconnect_address(self, address):
-        if address in self.connections:
-            self.connections[address].close()
-            del self.connections[address]
+        # Pop is atomic, therefore it doesn't need locks
+        connection = self.connections.pop(address, None)
+        if connection is not None:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
 
         self.reachability_table_lock.acquire()
-        for key, value in self.reachability_table:
-            if value[0] == address:
-                del self.reachability_table[key]
+        # Generate a new list without address
+        self.reachability_table = \
+            {key: value
+             for key, value in self.reachability_table.items()
+             if value[0] != address}
         self.reachability_table_lock.release()
 
         print(f"Disconnected from {address}")
@@ -83,9 +87,8 @@ class TCPNode(AbstractNode):
 
         try:
             destination_socket.sendall(message)
-        except BrokenPipeError:
-            self.connections[address].close()
-            del self.connections[address]
+        except:  # OS specific exception
+            self.disconnect_address(address)
             print(f"Connection with {address} was closed.")
 
     def stop_node(self):
@@ -97,8 +100,18 @@ class TCPNode(AbstractNode):
         # Close all the connections that had been opened
         for connection in self.connections.values():
             # send stop message
-            connection.send_message(struct.pack("!H", 0))
+            print("Closing", connection)
+            connection.sendall(struct.pack("!H", 0))
+            connection.shutdown(socket.SHUT_RDWR)
             connection.close()
+            print(connection, "closed")
+
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # this is a forceful shutdown
+        self.sock.close()
+        print("Closed everything")
 
 
 if __name__ == "__main__":

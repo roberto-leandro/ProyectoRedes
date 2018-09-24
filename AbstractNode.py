@@ -85,9 +85,10 @@ class AbstractNode(ABC):
             # as many threads may perform read/write we need to lock it
             self.reachability_table_lock.acquire()
 
-            if (ip, mask) not in self.reachability_table or \
-               self.reachability_table[(ip, mask)][1] > cost:
-                self.reachability_table[(ip, mask)] = (address, cost)
+            net_address = (ip, mask)
+            if net_address not in self.reachability_table or \
+               self.reachability_table[net_address][1] > cost:
+                self.reachability_table[net_address] = (address, cost)
 
             self.reachability_table_lock.release()
 
@@ -196,9 +197,10 @@ class AbstractNode(ABC):
             print("The reachability table is empty.")
 
         else:
-            for (ip, mask), cost in self.reachability_table.items():
+            for (ip, mask), (address, cost) in self.reachability_table.values():
                 print(f"Address: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]},",
-                      f"mask: {mask}, cost: {cost}.")
+                      f"mask: {mask}, address: {address}, {cost}.")
+                print(address, cost)
 
         self.reachability_table_lock.release()
 
