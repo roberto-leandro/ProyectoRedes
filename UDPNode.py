@@ -1,6 +1,7 @@
+import sys
 import struct
 import socket
-import sys
+import selectors
 from AbstractNode import AbstractNode
 
 
@@ -8,43 +9,59 @@ class UDPNode(AbstractNode):
     SOCKET_TYPE = socket.SOCK_DGRAM
     NODE_TYPE_STRING = "[IntAS Node]"
     BUFFER_SIZE = 2048  # Will be used when reading from a socket
+    SELECTOR_TIMEOUT = .5
 
     def handle_incoming_connections(self):
-        print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
+        self.sock.setblocking(False)
+        main_selector = selectors.DefaultSelector()
+        main_selector.register(self.sock, selectors.EVENT_READ)
 
         while not self.stopper.is_set():
-            message, address = self.receive_message(self.sock)
-            self.decode_message(message, address)
+            events = main_selector.select(UDPNode.SELECTOR_TIMEOUT)
+            for _ in events:
+                if self.stopper.is_set():
+                    break
+                message, address = self.receive_message(self.sock, None)
+                self.decode_message(message, address)
 
     def disconnect_address(self, address):
-        for key, value in self.reachability_table:
-            if value[0] == address:
-                del self.reachability_table[key]
-        print(f"Deleting {address} table entries")
+        self.reachability_table_lock.acquire()
+        # Generate a new list without address
+        self.reachability_table = \
+            {key: value
+             for key, value in self.reachability_table.items()
+             if value[0] != address}
+        self.reachability_table_lock.release()
+        print(f"DISCONNECT: Deleting {address} table entries")
 
-    def receive_message(self, connection):
+    def receive_message(self, connection, address):
         # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
         message, address = connection.recvfrom(self.BUFFER_SIZE)
-        print(f"CONNECTED WITH {address}")
+        print(f"MESSAGE: Connected with {address}")
 
         # Get the header, located in the first 2 bytes
         triplet_count = struct.unpack('!H', message[0:2])[0]
-        print(f"RECEIVED A MESSAGE WITH {triplet_count} TRIPLETS.")
+        print(f"MESSAGE: Received a message with {triplet_count} triplets.")
 
         if triplet_count == 0:
             self.disconnect_address(address)
-            return ([], "")
+            return [], ""
 
         # Return a buffer with only the triplets, omitting the header
-        return (message[2:], address)
+        return message[2:], address
 
     def send_message(self, ip, port, message):
-        print(f"SENDING {len(message)} BYTES TO {ip}:{port}")
+        print(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
         self.sock.sendto(message, (ip, port))
 
     def stop_node(self):
-        print("Deleting node...")
+        print("EXIT: Closing connection")
+
+        for _, value in self.reachability_table.items():
+            address = value[0]
+            close_message = struct.pack("!H", 0)
+            self.sock.sendto(close_message, address)
 
         # Set this flag to false, stopping all loops
         self.stopper.set()
