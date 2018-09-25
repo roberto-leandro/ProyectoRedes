@@ -2,52 +2,59 @@ import struct
 import sys
 import socket
 import threading
+import selectors
 from AbstractNode import AbstractNode
 
 
 class TCPNode(AbstractNode):
     SOCKET_TYPE = socket.SOCK_STREAM
     NODE_TYPE_STRING = "[PseudoBGP Node]"
+    SELECTOR_TIMEOUT = .5
 
     def __init__(self, ip, port):
         super().__init__(ip, port)
         self.connections = {}
 
     def handle_connection(self, connection, address):
-        print("Connected to:", address)
+        print(f"CONNECTION: New connection with {address}")
+        self.connections[address] = connection
+        connection.setblocking(False)
+        connection_selector = selectors.DefaultSelector()
+        connection_selector.register(connection, selectors.EVENT_READ)
+
         while not self.stopper.is_set():
-            self.connections[address] = connection
-            try:
+            if address not in self.connections:
+                # The socket is disconnected, close the thread
+                break
+            events = connection_selector.select(TCPNode.SELECTOR_TIMEOUT)
+            for _ in events:
                 message = self.receive_message(connection, address)
-            except OSError:
-                self.disconnect_address(address)
-                print(f"Connection with address: {address} has disconnected")
-                return
-            self.decode_message(message, address)
+                self.decode_message(message, address)
         connection.close()
 
     def handle_incoming_connections(self):
-        print("LISTENING TO INCOMING CONNECTIONS")
         self.sock.bind((self.ip, self.port))
         self.sock.listen(self.port)
+        self.sock.setblocking(False)
+        main_selector = selectors.DefaultSelector()
+        main_selector.register(self.sock, selectors.EVENT_READ)
 
         while not self.stopper.is_set():
-            try:
+            events = main_selector.select(TCPNode.SELECTOR_TIMEOUT)
+            # Ignore (key, value) as we only have one way of handling
+            for _ in events:
+                if self.stopper.is_set():
+                    # Closing sockets registers as an event
+                    break
                 connection_handler = \
                     threading.Thread(target=self.handle_connection,
                                      args=(self.sock.accept()))
                 connection_handler.start()
-            except OSError:
-                print("Main socket has closed")
 
     def disconnect_address(self, address):
         # Pop is atomic, therefore it doesn't need locks
         connection = self.connections.pop(address, None)
         if connection is not None:
-            try:
-                connection.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
             connection.close()
 
         self.reachability_table_lock.acquire()
@@ -58,8 +65,8 @@ class TCPNode(AbstractNode):
              if value[0] != address}
         self.reachability_table_lock.release()
 
-        print(f"Disconnected from {address}")
-        print(f"Deleting {address} table entries")
+        print(f"DISCONNECT: Disconnected from {address}")
+        print(f"DISCONNECT: Deleting {address} table entries")
 
     def receive_message(self, connection, address):
         # Header is the first 2 bytes, it contains the length
@@ -70,12 +77,12 @@ class TCPNode(AbstractNode):
             self.disconnect_address(address)
             return []
 
-        print(f"RECEIVED A MESSAGE WITH {triplet_count} TRIPLETS.")
+        print(f"MESSAGE: Received message with {triplet_count} triplets.")
         return connection.recv(self.TRIPLET_SIZE*triplet_count)
 
     def send_message(self, ip, port, message):
         address = (ip, port)
-        print(f"SENDING {len(message)} BYTES TO {ip}:{port} to {address}")
+        print(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
 
         if address in self.connections:
             destination_socket = self.connections[address]
@@ -89,29 +96,23 @@ class TCPNode(AbstractNode):
             destination_socket.sendall(message)
         except:  # OS specific exception
             self.disconnect_address(address)
-            print(f"Connection with {address} was closed.")
+            print(f"ERROR: Connection with {address} was closed.")
 
     def stop_node(self):
-        print("Deleting node...")
+        print("EXIT: Deleting node, all connections will close")
 
         # Set this flag to false, stopping all loops
         self.stopper.set()
 
         # Close all the connections that had been opened
-        for connection in self.connections.values():
+        for address, connection in self.connections.items():
             # send stop message
-            print("Closing", connection)
             connection.sendall(struct.pack("!H", 0))
-            connection.shutdown(socket.SHUT_RDWR)
             connection.close()
-            print(connection, "closed")
+            print(f"EXIT: Connection with {address} has closed")
 
-        try:
-            self.sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass  # this is a forceful shutdown
         self.sock.close()
-        print("Closed everything")
+        print("EXIT: All connections are closed")
 
 
 if __name__ == "__main__":
