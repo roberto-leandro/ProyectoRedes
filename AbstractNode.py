@@ -197,7 +197,7 @@ class AbstractNode(ABC):
             print("The reachability table is empty.")
 
         else:
-            for (ip, mask), (address, cost) in self.reachability_table.values():
+            for (ip, mask), (address, cost) in self.reachability_table.items():
                 print(f"Address: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]},",
                       f"mask: {mask}, address: {address}, {cost}.")
                 print(address, cost)
