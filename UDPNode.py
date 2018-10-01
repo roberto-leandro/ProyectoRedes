@@ -57,15 +57,17 @@ class UDPNode(AbstractNode):
         self.sock.sendto(message, (ip, port))
 
     def stop_node(self):
-        print("EXIT: Closing connection")
+        print("EXIT: Sending close message")
 
+        # Set this flag to false, stopping all loops
+        self.stopper.set()
+
+        self.reachability_table_lock.acquire()
         for _, value in self.reachability_table.items():
             address = value[0]
             close_message = struct.pack("!H", 0)
             self.sock.sendto(close_message, address)
-
-        # Set this flag to false, stopping all loops
-        self.stopper.set()
+        self.reachability_table_lock.release()
 
 
 if __name__ == "__main__":

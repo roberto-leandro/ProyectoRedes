@@ -15,18 +15,23 @@ class TCPNode(AbstractNode):
     def __init__(self, ip, port):
         super().__init__(ip, port)
         self.connections = {}
+        self.connections_lock = threading.Lock()
 
     def handle_connection(self, connection, address):
         print(f"CONNECTION: New connection with {address}")
+        self.connections_lock.acquire()
         self.connections[address] = connection
+        self.connections_lock.release()
         connection.setblocking(False)
         connection_selector = selectors.DefaultSelector()
         connection_selector.register(connection, selectors.EVENT_READ)
 
         while not self.stopper.is_set():
+            self.connections_lock.acquire()
             if address not in self.connections:
                 # The socket is disconnected, close the thread
                 break
+            self.connections_lock.release()
             events = connection_selector.select(TCPNode.SELECTOR_TIMEOUT)
             for _ in events:
                 message = self.receive_message(connection, address)
@@ -53,8 +58,9 @@ class TCPNode(AbstractNode):
                 connection_handler.start()
 
     def disconnect_address(self, address):
-        # Pop is atomic, therefore it doesn't need locks
+        self.connections_lock.acquire()
         connection = self.connections.pop(address, None)
+        self.connections_lock.release()
         if connection is not None:
             connection.close()
 
@@ -86,12 +92,16 @@ class TCPNode(AbstractNode):
         print(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
 
         if address in self.connections:
+            self.connections_lock.acquire()
             destination_socket = self.connections[address]
+            self.connections_lock.release()
         else:
             destination_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             destination_socket.settimeout(self.SOCKET_TIMEOUT)
             destination_socket.connect(address)
+            self.connections_lock.acquire()
             self.connections[address] = destination_socket
+            self.connections_lock.release()
 
         try:
             destination_socket.sendall(message)
@@ -106,11 +116,13 @@ class TCPNode(AbstractNode):
         self.stopper.set()
 
         # Close all the connections that had been opened
+        self.connections_lock.acquire()
         for address, connection in self.connections.items():
             # send stop message
             connection.sendall(struct.pack("!H", 0))
             connection.close()
             print(f"EXIT: Connection with {address} has closed")
+        self.connections_lock.release()
 
         self.sock.close()
         print("EXIT: All connections are closed")
