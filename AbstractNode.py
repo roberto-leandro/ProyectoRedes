@@ -8,6 +8,7 @@ try:
 except ImportError:
     pass
 
+
 class AbstractNode(ABC):
     HEADER_SIZE = 2
     TRIPLET_SIZE = 8
