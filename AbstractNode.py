@@ -39,7 +39,7 @@ class AbstractNode(ABC):
         connection_handler_thread = \
             threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
-        self.handle_console_commands()
+        # self.handle_console_commands()
 
     def handle_console_commands(self):
         print("Available commands are:")

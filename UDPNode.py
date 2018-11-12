@@ -12,6 +12,11 @@ class UDPNode(AbstractNode):
     BUFFER_SIZE = 2048  # Will be used when reading from a socket
     SELECTOR_TIMEOUT = .5
 
+    def __init__(self, ip, port, mask, neighbors):
+        super().__init__(ip, port)
+        self.neighbors = neighbors
+        self.mask = mask
+
     def handle_incoming_connections(self):
         self.sock.bind((self.ip, self.port))
         self.sock.setblocking(False)
@@ -80,4 +85,3 @@ if __name__ == "__main__":
     node = UDPNode(sys.argv[1], int(sys.argv[2]))
     node.start_node()
 
-sys.exit(0)
