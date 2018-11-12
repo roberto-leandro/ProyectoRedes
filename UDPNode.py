@@ -18,6 +18,9 @@ class UDPNode(AbstractNode):
         super().__init__(ip, port)
         self.neighbors = neighbors
         self.mask = mask
+        self.reachability_table = \
+            {(n_ip, n_mask): ((n_ip, n_port), n_cost)
+             for (n_ip, n_mask, n_port), n_cost in neighbors.items()}
 
     def start_node(self):
         super().start_node()
@@ -79,8 +82,9 @@ class UDPNode(AbstractNode):
         encoded_message = bytearray(2 + self.TRIPLET_SIZE*table_size)
         struct.pack_into("!H", encoded_message, 0, table_size)
         offset = 2
-        for (ip, mask), cost in self.reachability_table.items():
-            encoded_message[offset:offset+self.TRIPLET_SIZE] = self.encode_triplet(ip, mask, cost)
+        for (r_ip, r_mask), (_, r_cost) in self.reachability_table.items():
+            ip_tuple = tuple([int(tok) for tok in r_ip.split('.')])
+            encoded_message[offset:offset+self.TRIPLET_SIZE] = self.encode_triplet(ip_tuple, r_mask, r_cost)
             offset += self.TRIPLET_SIZE
         self.reachability_table_lock.release()
         if table_size > 0:

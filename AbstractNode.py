@@ -74,12 +74,13 @@ class AbstractNode(ABC):
             triplet = struct.unpack('!BBBBBBBB', message[offset:offset+8])
 
             # Get each of the triplet's values
-            ip = triplet[:4]
+            ip_bytes = triplet[:4]
+            ip = f"{ip_bytes[0]}.{ip_bytes[1]}.{ip_bytes[2]}.{ip_bytes[3]}"
             mask = triplet[4]
             cost = int.from_bytes(triplet[5:], byteorder='big', signed=False)
 
             offset += self.TRIPLET_SIZE
-            print(f"ADDRESS: {ip[0]}.{ip[1]}.{ip[2]}.{ip[3]}",
+            print(f"ADDRESS: {ip}" +
                   f", SUBNET MASK: {mask}, COST: {cost}")
 
             # Write to the reachability table,
