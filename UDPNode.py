@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import time
 import struct
 import socket
 import selectors
@@ -11,11 +12,22 @@ class UDPNode(AbstractNode):
     NODE_TYPE_STRING = "[IntAS Node]"
     BUFFER_SIZE = 2048  # Will be used when reading from a socket
     SELECTOR_TIMEOUT = .5
+    UPDATE_INTERVAL = 5
 
     def __init__(self, ip, port, mask, neighbors):
         super().__init__(ip, port)
         self.neighbors = neighbors
         self.mask = mask
+
+    def start_node(self):
+        super().start_node()
+        while not self.stopper.is_set():
+            time.sleep(self.UPDATE_INTERVAL)
+            self.update_route()
+
+    def update_route(self):
+        for (ip, _, port) in self.neighbors:
+            self.send_reachability_table(ip, port)
 
     def handle_incoming_connections(self):
         self.sock.bind((self.ip, self.port))
@@ -60,6 +72,19 @@ class UDPNode(AbstractNode):
     def send_message(self, ip, port, message):
         print(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
         self.sock.sendto(message, (ip, port))
+
+    def send_reachability_table(self, ip, port):
+        self.reachability_table_lock.acquire()
+        table_size = len(self.reachability_table)
+        encoded_message = bytearray(2 + self.TRIPLET_SIZE*table_size)
+        struct.pack_into("!H", encoded_message, 0, table_size)
+        offset = 2
+        for (ip, mask), cost in self.reachability_table.items():
+            encoded_message[offset:offset+self.TRIPLET_SIZE] = self.encode_triplet(ip, mask, cost)
+            offset += self.TRIPLET_SIZE
+        self.reachability_table_lock.release()
+        if table_size > 0:
+            self.send_message(ip, port, encoded_message)
 
     def stop_node(self):
         print("EXIT: Sending close message")

@@ -4,23 +4,17 @@ import csv
 import multiprocessing
 from UDPNode import UDPNode
 
-try:
-    # Nice input() handling
-    import readline
-except ImportError:
-    pass
-
 
 def spawn_node(node, edges):
     neighbors = dict()
     for (node_a, node_b), cost in edges.items():
         if node_a == node:
-            neighbors[node_b] = int(cost)
+            neighbors[node_b] = cost
         elif node_b == node:
-            neighbors[node_a] = int(cost)
+            neighbors[node_a] = cost
     ip = node[0]
-    mask = int(node[1])
-    port = int(node[2])
+    mask = node[1]
+    port = node[2]
     new_node = UDPNode(ip, port, mask, neighbors)
     new_node.start_node()
 
@@ -32,13 +26,12 @@ def commands_from_csv(csv_file):
     with open(csv_file, newline="") as csv_file:
         csv_reader = csv.reader(csv_file)
         for row in csv_reader:
-            node_a = tuple(row[0:3])
-            node_b = tuple(row[3:6])
-            cost = row[6]
+            node_a = (row[0], int(row[1]), int(row[2]))
+            node_b = (row[3], int(row[4]), int(row[5]))
+            cost = int(row[6])
             nodes.add(node_a)
             nodes.add(node_b)
             edges[tuple([node_a, node_b])] = cost
-
     processes = list()
     for node in nodes:
         new_process = multiprocessing.Process(target=spawn_node, args=(node, edges))

@@ -151,6 +151,28 @@ class AbstractNode(ABC):
 
             return address_token_list, net_mask, cost
 
+    @staticmethod
+    def encode_triplet(address, net_mask, cost):
+        message = bytearray(AbstractNode.TRIPLET_SIZE)
+        # Each triplet is encoded with the following 8-byte format:
+        # BBBB (4 bytes) network address
+        #  B   (1 byte)  subnet mask
+        #  I   (4 bytes) cost.
+        #      The cost should only be 3 bytes, this is handled below.
+        struct.pack_into('!BBBBB', message, 0,
+                         address[0], address[1],
+                         address[2], address[3],
+                         net_mask)
+
+        # Pack the cost into a 4 byte buffer
+        cost_bytes = struct.pack('!I', cost)
+
+        # Write the cost into the message buffer, copying only 3 bytes and omitting 1
+        # The least significant byte is the one omitted because its encoded
+        # as big endian
+        message[5:8] = cost_bytes[1:]
+        return message
+
     def read_and_encode_message(self):
         length = 0
         while not length > 0:
@@ -166,25 +188,7 @@ class AbstractNode(ABC):
         offset = 2
         for _ in range(0, length):
             address, net_mask, cost = self.__get_valid_message_input()
-
-            # Each triplet is encoded with the following 8-byte format:
-            # BBBB (4 bytes) network address
-            #  B   (1 byte)  subnet mask
-            #  I   (4 bytes) cost.
-            #      The cost should only be 3 bytes, this is handled below.
-            struct.pack_into('!BBBBB', message, offset,
-                             address[0], address[1],
-                             address[2], address[3],
-                             net_mask)
-
-            # Pack the cost into a 4 byte buffer
-            cost_bytes = struct.pack('!I', cost)
-
-            # Write the cost into the message buffer, copying only 3 bytes and omitting 1
-            # The least significant byte is the one omitted because its encoded
-            # as big endian
-            message[offset+5:offset+8] = cost_bytes[1:]
-
+            message[offset:offset+self.TRIPLET_SIZE] = self.encode_triplet(address, net_mask, cost)
             # Move the offset to write the next triplet
             offset += self.TRIPLET_SIZE
 
