@@ -16,7 +16,6 @@ class UDPNode(AbstractNode):
 
     def __init__(self, ip, port, mask, neighbors):
         super().__init__(ip, port)
-        self.neighbors = neighbors
         self.mask = mask
         self.reachability_table = \
             {(n_ip, n_mask): ((n_ip, n_port), n_cost)
@@ -31,6 +30,10 @@ class UDPNode(AbstractNode):
     def update_route(self):
         for (ip, _, port) in self.neighbors:
             self.send_reachability_table(ip, port)
+
+    def update_reachability_table(self, net_address, node_address, cost):
+        total_cost = cost + self.neighbors[node_address]
+        super().update_reachability_table(net_address, node_address, total_cost)
 
     def handle_incoming_connections(self):
         self.sock.bind((self.ip, self.port))

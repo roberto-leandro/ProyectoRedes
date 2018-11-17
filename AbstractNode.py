@@ -82,17 +82,19 @@ class AbstractNode(ABC):
             offset += self.TRIPLET_SIZE
             print(f"ADDRESS: {ip}" +
                   f", SUBNET MASK: {mask}, COST: {cost}")
-
-            # Write to the reachability table,
-            # as many threads may perform read/write we need to lock it
-            self.reachability_table_lock.acquire()
-
             net_address = (ip, mask)
-            if net_address not in self.reachability_table or \
-               self.reachability_table[net_address][1] > cost:
-                self.reachability_table[net_address] = (address, cost)
+            self.update_reachability_table(net_address, address, cost)
 
-            self.reachability_table_lock.release()
+    def update_reachability_table(self, net_address, node_address, cost):
+        # Write to the reachability table,
+        # as many threads may perform read/write we need to lock it
+        self.reachability_table_lock.acquire()
+
+        if net_address not in self.reachability_table or \
+                self.reachability_table[net_address][1] > cost:
+            self.reachability_table[net_address] = (node_address, cost)
+
+        self.reachability_table_lock.release()
 
     @staticmethod
     def __get_valid_message_input():
