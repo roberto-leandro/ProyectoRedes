@@ -20,6 +20,9 @@ class UDPNode(AbstractNode):
         self.reachability_table = \
             {(n_ip, n_mask): ((n_ip, n_port), n_cost)
              for (n_ip, n_mask, n_port), n_cost in neighbors.items()}
+        self.neighbors = \
+            {(n_ip, n_port): n_cost
+             for (n_ip, n_mask, n_port), n_cost in neighbors.items()}
 
     def start_node(self):
         super().start_node()
@@ -28,7 +31,7 @@ class UDPNode(AbstractNode):
             self.update_route()
 
     def update_route(self):
-        for (ip, _, port) in self.neighbors:
+        for (ip, port) in self.neighbors:
             self.send_reachability_table(ip, port)
 
     def update_reachability_table(self, net_address, node_address, cost):
