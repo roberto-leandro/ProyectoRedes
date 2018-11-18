@@ -6,6 +6,15 @@ import socket
 import selectors
 from AbstractNode import AbstractNode
 
+PKT_TYPE_UPDATE         = 1
+PKT_TYPE_KEEP_ALIVE     = 2
+PKT_TYPE_ACK_KEEP_ALIVE = 3
+PKT_TYPE_FLOOD          = 4
+PKT_TYPE_DATA_MSG       = 5
+PKT_TYPE_COST_CHANGE    = 6
+PKT_TYPE_DEAD           = 7
+HOP_NUMBER = 50
+
 
 class UDPNode(AbstractNode):
     SOCKET_TYPE = socket.SOCK_DGRAM
@@ -66,17 +75,22 @@ class UDPNode(AbstractNode):
         # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
         message, address = connection.recvfrom(self.BUFFER_SIZE)
         print(f"MESSAGE: Connected with {address}")
+        message_type = message[0]
 
-        # Get the header, located in the first 2 bytes
-        triplet_count = struct.unpack('!H', message[0:2])[0]
-        print(f"MESSAGE: Received a message with {triplet_count} triplets.")
+        if message_type == PKT_TYPE_UPDATE:
+            triplet_count = struct.unpack('!H', message[1:3])[0]
+            print(f"MESSAGE: Received of type UPDATE with {triplet_count} triplets.")
 
-        if triplet_count == 0:
-            self.disconnect_address(address)
+            # TODO: does n = 0 still means disconnect in a update packet?
+            if triplet_count == 0:
+                self.disconnect_address(address)
+                return [], ""
+
+            # Return a buffer with only the triplets, omitting the header
+            return message[3:], address
+        else:
+            # TODO: handle all the other cases
             return [], ""
-
-        # Return a buffer with only the triplets, omitting the header
-        return message[2:], address
 
     def send_message(self, ip, port, message):
         print(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
@@ -85,9 +99,10 @@ class UDPNode(AbstractNode):
     def send_reachability_table(self, ip, port):
         self.reachability_table_lock.acquire()
         table_size = len(self.reachability_table)
-        encoded_message = bytearray(2 + self.TRIPLET_SIZE*table_size)
-        struct.pack_into("!H", encoded_message, 0, table_size)
-        offset = 2
+        encoded_message = bytearray(3 + self.TRIPLET_SIZE*table_size)
+        struct.pack_into("!B", encoded_message, 0, PKT_TYPE_UPDATE)
+        struct.pack_into("!H", encoded_message, 1, table_size)
+        offset = 3
         for (r_ip, r_mask), (_, r_cost) in self.reachability_table.items():
             ip_tuple = tuple([int(tok) for tok in r_ip.split('.')])
             encoded_message[offset:offset+self.TRIPLET_SIZE] = self.encode_triplet(ip_tuple, r_mask, r_cost)
