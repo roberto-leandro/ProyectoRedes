@@ -88,9 +88,11 @@ class UDPNode(AbstractNode):
 
             # Return a buffer with only the triplets, omitting the header
             return message[3:], address
-        else:
-            # TODO: handle all the other cases
-            return [], ""
+        elif message_type == PKT_TYPE_KEEP_ALIVE:
+            self.send_ack_keep_alive(address[0], address[1])
+
+        # TODO: handle all the other cases
+        return [], ""
 
     def send_message(self, ip, port, message):
         print(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
@@ -110,6 +112,16 @@ class UDPNode(AbstractNode):
         self.reachability_table_lock.release()
         if table_size > 0:
             self.send_message(ip, port, encoded_message)
+
+    def send_ack_keep_alive(self, ip, port):
+        message = bytearray(1)
+        struct.pack_into("!B", message, 0, PKT_TYPE_ACK_KEEP_ALIVE)
+        self.send_message(ip, port, message)
+
+    def send_keep_alive(self, ip, port):
+        message = bytearray(1)
+        struct.pack_into("!B", message, 0, PKT_TYPE_KEEP_ALIVE)
+        self.send_message(ip, port, message)
 
     def stop_node(self):
         print("EXIT: Sending close message")
