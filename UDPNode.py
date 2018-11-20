@@ -4,6 +4,7 @@ import time
 import struct
 import socket
 import selectors
+import threading
 from AbstractNode import AbstractNode
 
 PKT_TYPE_UPDATE         = 1
@@ -14,6 +15,7 @@ PKT_TYPE_DATA_MSG       = 5
 PKT_TYPE_COST_CHANGE    = 6
 PKT_TYPE_DEAD           = 7
 HOP_NUMBER = 50
+SKIPPED_UPDATES_AFTER_FLOOD = 3
 
 
 class UDPNode(AbstractNode):
@@ -32,6 +34,9 @@ class UDPNode(AbstractNode):
         self.neighbors = \
             {(n_ip, n_port): n_cost
              for (n_ip, n_mask, n_port), n_cost in neighbors.items()}
+        # TODO: lock?
+        self.updates_to_ignore = 0
+        self.neighbors_lock = threading.Lock()
 
     def start_node(self):
         super().start_node()
@@ -44,7 +49,8 @@ class UDPNode(AbstractNode):
             self.send_reachability_table(ip, port)
 
     def update_reachability_table(self, net_address, node_address, cost):
-        total_cost = cost + self.neighbors[node_address]
+        with self.neighbors_lock:
+            total_cost = cost + self.neighbors[node_address]
         super().update_reachability_table(net_address, node_address, total_cost)
 
     def handle_incoming_connections(self):
@@ -60,6 +66,12 @@ class UDPNode(AbstractNode):
                     break
                 message, address = self.receive_message(self.sock, None)
                 self.decode_message(message, address)
+
+    def disconnect_neighbor(self, address):
+        with self.neighbors_lock:
+            self.neighbors.pop(address, default=None)
+        self.disconnect_address(address)
+        # Probably should start a flood
 
     def disconnect_address(self, address):
         self.reachability_table_lock.acquire()
@@ -78,19 +90,30 @@ class UDPNode(AbstractNode):
         message_type = message[0]
 
         if message_type == PKT_TYPE_UPDATE:
+            if self.updates_to_ignore > 0:
+                return [], ""
             triplet_count = struct.unpack('!H', message[1:3])[0]
             print(f"MESSAGE: Received of type UPDATE with {triplet_count} triplets.")
-
             # TODO: does n = 0 still means disconnect in a update packet?
             if triplet_count == 0:
                 self.disconnect_address(address)
                 return [], ""
-
             # Return a buffer with only the triplets, omitting the header
             return message[3:], address
         elif message_type == PKT_TYPE_KEEP_ALIVE:
+            print("MESSAGE: Received of type KEEP_ALIVE")
             self.send_ack_keep_alive(address[0], address[1])
+        elif message_type == PKT_TYPE_FLOOD:
+            hops = struct.unpack("!B", message[1:2])[0]
+            print(f"MESSAGE: Received of type FLOOD: with {hops} hops")
+            print("UPDATE: Flushing reachability table")
+            with self.reachability_table_lock:
+                self.reachability_table.clear()
+            self.send_flood_message(hops - 1)
+            self.updates_to_ignore = SKIPPED_UPDATES_AFTER_FLOOD + 1
 
+        if self.updates_to_ignore > 0:
+            self.updates_to_ignore -= 1
         # TODO: handle all the other cases
         return [], ""
 
@@ -112,6 +135,13 @@ class UDPNode(AbstractNode):
         self.reachability_table_lock.release()
         if table_size > 0:
             self.send_message(ip, port, encoded_message)
+
+    def send_flood_message(self, hops):
+        message = bytearray(2)
+        struct.pack_into("!B", message, 0, PKT_TYPE_FLOOD)
+        struct.pack_into("!B", message, 1, hops)
+        for ip, port in self.neighbors:
+            self.send_message(ip, port, message)
 
     def send_ack_keep_alive(self, ip, port):
         message = bytearray(1)
