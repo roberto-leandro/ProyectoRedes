@@ -91,13 +91,10 @@ class UDPNode(AbstractNode):
 
         if message_type == PKT_TYPE_UPDATE:
             if self.updates_to_ignore > 0:
+                self.updates_to_ignore -= 1
                 return [], ""
             triplet_count = struct.unpack('!H', message[1:3])[0]
             print(f"MESSAGE: Received of type UPDATE with {triplet_count} triplets.")
-            # TODO: does n = 0 still means disconnect in a update packet?
-            if triplet_count == 0:
-                self.disconnect_address(address)
-                return [], ""
             # Return a buffer with only the triplets, omitting the header
             return message[3:], address
         elif message_type == PKT_TYPE_KEEP_ALIVE:
@@ -174,6 +171,6 @@ if __name__ == "__main__":
         print("Incorrect arg number")
         sys.exit(1)
 
-    node = UDPNode(sys.argv[1], int(sys.argv[2]))
-    node.start_node()
+    # node = UDPNode(sys.argv[1], int(sys.argv[2]))
+    # node.start_node()
 
