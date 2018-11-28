@@ -28,9 +28,6 @@ class AbstractNode(ABC):
 
         # Will be set when the node should be deleted
         self.stopper = threading.Event()
-        print(self.NODE_TYPE_STRING)
-        print(f"Address: {ip}")
-        print(f"Port: {port}")
 
     def start_node(self):
         """ Create two new threads
@@ -162,6 +159,7 @@ class AbstractNode(ABC):
         #  B   (1 byte)  subnet mask
         #  I   (4 bytes) cost.
         #      The cost should only be 3 bytes, this is handled below.
+        print(net_mask)
         struct.pack_into('!BBBBB', message, 0,
                          address[0], address[1],
                          address[2], address[3],
@@ -191,6 +189,7 @@ class AbstractNode(ABC):
         offset = 2
         for _ in range(0, length):
             address, net_mask, cost = self.__get_valid_message_input()
+            print(net_mask)
             message[offset:offset+self.TRIPLET_SIZE] = self.encode_triplet(address, net_mask, cost)
             # Move the offset to write the next triplet
             offset += self.TRIPLET_SIZE

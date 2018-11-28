@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import csv
+import os
 import multiprocessing
 from UDPNode import UDPNode
 
@@ -15,7 +16,7 @@ def spawn_node(node, edges):
     ip = node[0]
     mask = node[1]
     port = node[2]
-    new_node = UDPNode(ip, port, mask, neighbors)
+    new_node = UDPNode(ip, mask, port, neighbors)
     new_node.start_node()
 
 
@@ -32,14 +33,28 @@ def commands_from_csv(csv_file):
             nodes.add(node_a)
             nodes.add(node_b)
             edges[tuple([node_a, node_b])] = cost
-    processes = list()
+
     for node in nodes:
+        this_node = f"{node[0]} {node[1]} {node[2]}"
+        neighbors = ""
+        for (node_a, node_b), cost in edges.items():
+            if node_a == node:
+                neighbors += f"{node_b[0]} {node_b[1]} {node_b[2]} {cost} "
+            elif node_b == node:
+                neighbors += f"{node_a[0]} {node_a[1]} {node_a[2]} {cost} "
+
+        print(f"UDPNode.py {this_node} {neighbors}")
+
+        #os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
+
+#"""
+        processes = list()
         new_process = multiprocessing.Process(target=spawn_node, args=(node, edges))
         processes.append(new_process)
 
-    for process in processes:
-        process.start()
-
+        for process in processes:
+            process.start()
+#"""
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

@@ -25,7 +25,7 @@ class UDPNode(AbstractNode):
     SELECTOR_TIMEOUT = .5
     UPDATE_INTERVAL = 5
 
-    def __init__(self, ip, port, mask, neighbors):
+    def __init__(self, ip, mask, port, neighbors):
         super().__init__(ip, port)
         self.mask = mask
         self.reachability_table = \
@@ -34,9 +34,20 @@ class UDPNode(AbstractNode):
         self.neighbors = \
             {(n_ip, n_port): n_cost
              for (n_ip, n_mask, n_port), n_cost in neighbors.items()}
+
+        #self.reachability_table = {}
+        #self.neighbors = {}
+        #for neighbor, n_cost in neighbors.items():
+        #    self.neighbors[(neighbor[0], neighbor[2])] = n_cost
+        #    self.reachability_table[(neighbor[0], neighbor[1])] = ((neighbor[0], neighbor[2]), n_cost)
+
         # TODO: lock?
         self.updates_to_ignore = 0
         self.neighbors_lock = threading.Lock()
+        print(self.NODE_TYPE_STRING)
+        print(f"Address: {ip}")
+        print(f"Port: {port}")
+        print(f"Mask: {mask}")
 
     def start_node(self):
         super().start_node()
@@ -164,13 +175,18 @@ class UDPNode(AbstractNode):
         self.reachability_table_lock.release()
 
 
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(sys.argv)
-        print(len(sys.argv))
+    if len(sys.argv) < 4:
         print("Incorrect arg number")
         sys.exit(1)
 
-    # node = UDPNode(sys.argv[1], int(sys.argv[2]))
-    # node.start_node()
+    # Parse neighbors
+    neighbors_string = {}
+    for i in range(1, (len(sys.argv) - 4) // 4 + 1):
+        index = i*4
+        print(f"{sys.argv[index]} {sys.argv[index+1]} {sys.argv[index+2]} {int(sys.argv[index+3])}")
+        neighbors_string[sys.argv[index], int(sys.argv[index + 1]), int(sys.argv[index + 2])] = int(sys.argv[index + 3])
+    node = UDPNode(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), neighbors_string)
+    node.start_node()
 
