@@ -20,19 +20,19 @@ PKT_TYPE_DEAD           = 7
 HOP_NUMBER = 50
 SKIPPED_UPDATES_AFTER_FLOOD = 3
 
-# Data size definitions
-TUPLE_COUNT_SIZE_BYTES      = 2
-TUPLE_SIZE_BYTES            = 10
-PKT_TYPE_SIZE_BYTES         = 2
+# Data size definitions in bytes
+TUPLE_COUNT_SIZE      = 2
+TUPLE_SIZE            = 10
+PKT_TYPE_SIZE         = 2
 BUFFER_SIZE = 2048  # Will be used when reading from a socket TODO reads from the socket should be dynamic
 
 # Various timeouts
 SELECTOR_TIMEOUT = .5
 SOCKET_TIMEOUT = 5.0
 
-# Interval at which updates at sent
-UPDATE_INTERVAL_SECONDS = 20
-
+# Time intervals in seconds
+SEND_TABLE_UPDATE_INTERVAL = 20
+SEND_KEEP_ALIVE_INTERVAL = 20
 
 class UDPNode:
 
@@ -42,6 +42,8 @@ class UDPNode:
         self.ip = ip
         self.mask = mask
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind((self.ip, self.port))
+        self.sock.setblocking(False) #TODO should be true
 
         self.updates_to_ignore = 0
 
@@ -50,8 +52,8 @@ class UDPNode:
         self.reachability_table = {}
         # Neighbors: ip, port : mask, cost, Timer obj, current_retries (0 if node is dead)
         self.neighbors = {}
+        # Keep alive acks: ip, port :
         for (n_ip, n_mask, n_port), n_cost in neighbors.items():
-            # neighbor = (ip, mask, port)
             self.neighbors[(n_ip, n_port)] = (n_mask, n_cost)
             self.reachability_table[(n_ip, n_port)] = (n_mask, (n_ip, n_port), n_cost)  # FIXME should not be filled yet
 
@@ -70,21 +72,21 @@ class UDPNode:
         self.print_reachability_table()
 
     def start_node(self):
-        connection_handler_thread = \
-            threading.Thread(target=self.handle_incoming_connections)
+        connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
-        while not self.stopper.is_set():
-            time.sleep(UPDATE_INTERVAL_SECONDS)
-            self.update_route()
+
+        while not self.stopper.wait(SEND_TABLE_UPDATE_INTERVAL):
+            for (ip, port) in self.neighbors:
+                self.send_reachability_table(ip, port)
         print("Finished the update sending loop!")
 
-    def update_route(self):
-        for (ip, port) in self.neighbors:
-            self.send_reachability_table(ip, port)
+    def send_keep_alive(self):
+        while not self.stopper.wait(SEND_KEEP_ALIVE_INTERVAL):
+            for (ip, port) in self.neighbors:
+                self.send_keep_alive(ip, port)
+        print("Finished the send keep alive loop!")
 
     def handle_incoming_connections(self):
-        self.sock.bind((self.ip, self.port))
-        self.sock.setblocking(False)
         main_selector = selectors.DefaultSelector()
         main_selector.register(self.sock, selectors.EVENT_READ)
 
@@ -94,22 +96,23 @@ class UDPNode:
                 if self.stopper.is_set():
                     break
                 self.receive_message(self.sock)
+        print("Finished the handle incoming connections loop!")
 
     def receive_message(self, connection):
         # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
         message, address = connection.recvfrom(BUFFER_SIZE)
         print(f"MESSAGE: Connected with {address}")
 
-        message_type = int.from_bytes(message[0:PKT_TYPE_SIZE_BYTES], byteorder='big', signed=False)
+        message_type = int.from_bytes(message[0:PKT_TYPE_SIZE], byteorder='big', signed=False)
 
         if message_type == PKT_TYPE_UPDATE:
             if self.updates_to_ignore > 0:
                 self.updates_to_ignore -= 1
                 return
-            tuple_count = struct.unpack('!H', message[PKT_TYPE_SIZE_BYTES:PKT_TYPE_SIZE_BYTES + 2])[0]
+            tuple_count = struct.unpack('!H', message[PKT_TYPE_SIZE:PKT_TYPE_SIZE + 2])[0]
             print(f"MESSAGE: Received of type UPDATE of size {len(message)} with {tuple_count} tuples.")
             # Decode the received tuples and update the reachability table if necessary
-            self.decode_tuples(message[PKT_TYPE_SIZE_BYTES + TUPLE_COUNT_SIZE_BYTES:], address)
+            self.decode_tuples(message[PKT_TYPE_SIZE + TUPLE_COUNT_SIZE:], address)
 
         elif message_type == PKT_TYPE_KEEP_ALIVE:
             print("MESSAGE: Received of type KEEP_ALIVE")
@@ -134,26 +137,26 @@ class UDPNode:
     def send_reachability_table(self, ip, port):
         self.reachability_table_lock.acquire()
         table_size = len(self.reachability_table)
-        encoded_message = bytearray(PKT_TYPE_SIZE_BYTES + TUPLE_COUNT_SIZE_BYTES + TUPLE_SIZE_BYTES * table_size)
+        encoded_message = bytearray(PKT_TYPE_SIZE + TUPLE_COUNT_SIZE + TUPLE_SIZE * table_size)
 
         # 2 bytes for the message type
         struct.pack_into("!H", encoded_message, 0, PKT_TYPE_UPDATE)
 
         # 2 bytes for the amount of tuples
-        struct.pack_into("!H", encoded_message, PKT_TYPE_SIZE_BYTES, table_size)
+        struct.pack_into("!H", encoded_message, PKT_TYPE_SIZE, table_size)
 
         # Iterate the reachability table, writing each tuple to the encoded_message buffer
-        offset = PKT_TYPE_SIZE_BYTES + TUPLE_COUNT_SIZE_BYTES  # will to the next empty space in the buffer
+        offset = PKT_TYPE_SIZE + TUPLE_COUNT_SIZE  # will to the next empty space in the buffer
         for (r_ip, r_port), (r_mask, _, r_cost) in self.reachability_table.items():
             ip_tuple = tuple([int(tok) for tok in r_ip.split('.')])
-            encoded_message[offset:offset + TUPLE_SIZE_BYTES] = self.encode_tuple(ip_tuple, r_port, r_mask, r_cost)
-            offset += TUPLE_SIZE_BYTES
+            encoded_message[offset:offset + TUPLE_SIZE] = self.encode_tuple(ip_tuple, r_port, r_mask, r_cost)
+            offset += TUPLE_SIZE
         self.reachability_table_lock.release()
         if table_size > 0:
             self.send_message(ip, port, encoded_message)
 
     def encode_tuple(self, ip, port, net_mask, cost):
-        message = bytearray(TUPLE_SIZE_BYTES)
+        message = bytearray(TUPLE_SIZE)
         # Each tuple is encoded with the following 10-byte format:
         # BBBB (4 bytes) ip address (one B byte for each integer in the address)
         #  B   (1 byte)  subnet mask
@@ -179,7 +182,7 @@ class UDPNode:
         tuple_bytes = bytearray(10)
         while offset < len(message):
             # Unpack the binary
-            tuple_bytes = struct.unpack('!BBBBBBBBBB', message[offset:offset+TUPLE_SIZE_BYTES])
+            tuple_bytes = struct.unpack('!BBBBBBBBBB', message[offset:offset + TUPLE_SIZE])
 
             # Get each of the triplet's values
             ip_bytes = tuple_bytes[:4]
@@ -188,7 +191,7 @@ class UDPNode:
             port = int.from_bytes(tuple_bytes[5:7], byteorder='big', signed=False)
             cost = int.from_bytes(tuple_bytes[7:], byteorder='big', signed=False)
 
-            offset += TUPLE_SIZE_BYTES
+            offset += TUPLE_SIZE
             print(f"ADDRESS: {ip}" +
                   f", SUBNET MASK: {mask}, COST: {cost}")
 
