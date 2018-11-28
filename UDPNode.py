@@ -33,6 +33,7 @@ SEND_KEEP_ALIVE_INTERVAL = 3000  # SEND_TABLE_UPDATE_INTERVAL*1.5
 # Various timeouts
 SELECTOR_TIMEOUT = .5
 SOCKET_TIMEOUT = 5.0
+NODE_AWAKEN_TIMEOUT = 3
 KEEP_ALIVE_TIMEOUT = 0.5
 KEEP_ALIVE_RETRIES = 5
 
@@ -56,8 +57,11 @@ class UDPNode:
         # Neighbors: ip, port : mask, cost,  current_retries (0 if node is dead), Timer obj
         self.neighbors = {}
         for (n_ip, n_mask, n_port), n_cost in neighbors.items():
-            self.neighbors[(n_ip, n_port)] = (n_mask, n_cost, KEEP_ALIVE_RETRIES, None)
-            self.reachability_table[(n_ip, n_port)] = (n_mask, (n_ip, n_port), n_cost)  # FIXME should not be filled yet
+            self.neighbors[(n_ip, n_port)] = (n_mask, n_cost, 0, None)
+            #self.reachability_table[(n_ip, n_port)] = (n_mask, (n_ip, n_port), n_cost)  # FIXME should not be filled yet
+
+        # Used to wake up nodes
+        self.unawakened_neighbors = list(self.neighbors.keys())
 
         # Locks
         self.reachability_table_lock = threading.Lock()
@@ -67,7 +71,8 @@ class UDPNode:
         self.stopper = threading.Event()
 
         # Threads
-        self.connection_handler_thread = threading.Thread(target=self.handle_incoming_connections)
+        self.neighbor_init_thread = threading.Thread(target=self.neighbor_init_loop)
+        self.connection_handler_thread = threading.Thread(target=self.handle_incoming_connections_loop)
         self.keep_alive_handler_thread = threading.Thread(target=self.send_keep_alive_loop)
         self.update_handler_thread = threading.Thread(target=self.send_updates_loop)
         self.command_handler_thread = threading.Thread(target=self.handle_console_commands)
@@ -83,6 +88,9 @@ class UDPNode:
         print("    printNeighbors\n")
 
     def start_node(self):
+        # Start the thread that checks if the node's neighbors are alive
+        self.neighbor_init_thread.start()
+
         # Start the thread that will listen and respond to console commands
         self.command_handler_thread.start()
 
@@ -94,6 +102,13 @@ class UDPNode:
 
         # Start the thread that handles incoming messages
         self.connection_handler_thread.start()
+
+    def neighbor_init_loop(self):
+        while not self.stopper.wait(NODE_AWAKEN_TIMEOUT) and self.unawakened_neighbors:
+            for (ip, port) in self.unawakened_neighbors:
+                print(f"Waking {ip}:{port}")
+                self.send_keep_alive(ip, port)
+        print("All neighbors have awakened!")
 
     def send_updates_loop(self):
         self.send_update()
@@ -144,10 +159,7 @@ class UDPNode:
                 self.neighbors[ip, port] = (neighbor[0], neighbor[1], neighbor[2]-1, None)
                 print(f"Keep alive message to {ip}:{port} timed out! {neighbor[2]} retries remaining...")
 
-    def handle_incoming_connections(self):
-        main_selector = selectors.DefaultSelector()
-        main_selector.register(self.sock, selectors.EVENT_READ)
-
+    def handle_incoming_connections_loop(self):
         while not self.stopper.is_set():
             self.receive_message(self.sock)
         print("Finished the handle incoming connections loop!")
@@ -179,6 +191,11 @@ class UDPNode:
 
         elif message_type == PKT_TYPE_ACK_KEEP_ALIVE:
             print("MESSAGE: Received of type ACK_KEEP_ALIVE")
+            # Check if this is the first time the node has replied
+            if address in self.unawakened_neighbors:
+                print(f"Neighbor {address[0]}:{address[1]} has woken up!")
+                self.unawakened_neighbors.remove(address)
+
             with self.neighbors_lock:
                 # Cancel the timer
                 neighbor = self.neighbors[address]
@@ -251,7 +268,6 @@ class UDPNode:
 
     def handle_console_commands(self):
         while not self.stopper.is_set():
-            print("imma read")
             try:
                 pass
                 command = input("Enter your command...\n> ")
