@@ -1,6 +1,13 @@
 import struct
+import threading
 import UDPNode as Constants
 
+logging_lock = threading.Lock()
+
+
+def log_message(message):
+    with logging_lock:
+        print(message)
 
 
 def encode_tuple(ip, port, net_mask, cost):
