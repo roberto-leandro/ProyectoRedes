@@ -46,7 +46,7 @@ def commands_from_csv(csv_file):
         print(f"UDPNode.py {this_node} {neighbors}")
 
         lol = True
-        if lol:
+        if not lol:
             os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
         else:
             processes = list()

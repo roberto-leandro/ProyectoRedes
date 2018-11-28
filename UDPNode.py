@@ -26,13 +26,15 @@ TUPLE_SIZE            = 10
 PKT_TYPE_SIZE         = 2
 BUFFER_SIZE = 2048  # Will be used when reading from a socket TODO reads from the socket should be dynamic
 
+# Time intervals in seconds
+SEND_TABLE_UPDATE_INTERVAL = 2
+SEND_KEEP_ALIVE_INTERVAL = SEND_TABLE_UPDATE_INTERVAL*1.5
+
 # Various timeouts
 SELECTOR_TIMEOUT = .5
 SOCKET_TIMEOUT = 5.0
-
-# Time intervals in seconds
-SEND_TABLE_UPDATE_INTERVAL = 20
-SEND_KEEP_ALIVE_INTERVAL = 20
+KEEP_ALIVE_TIMEOUT = SEND_KEEP_ALIVE_INTERVAL*0.8
+KEEP_ALIVE_RETRIES = 5
 
 class UDPNode:
 
@@ -50,19 +52,18 @@ class UDPNode:
         # Structures
         # Reachability table: ip, port : mask, (ip, port), cost
         self.reachability_table = {}
-        # Neighbors: ip, port : mask, cost, Timer obj, current_retries (0 if node is dead)
+        # Neighbors: ip, port : mask, cost,  current_retries (0 if node is dead), Timer obj
         self.neighbors = {}
-        # Keep alive acks: ip, port :
         for (n_ip, n_mask, n_port), n_cost in neighbors.items():
-            self.neighbors[(n_ip, n_port)] = (n_mask, n_cost)
+            self.neighbors[(n_ip, n_port)] = (n_mask, n_cost, KEEP_ALIVE_RETRIES, None)
             self.reachability_table[(n_ip, n_port)] = (n_mask, (n_ip, n_port), n_cost)  # FIXME should not be filled yet
 
         # Locks
         self.reachability_table_lock = threading.Lock()
+        self.neighbors_lock = threading.Lock()
 
         # Events
         self.stopper = threading.Event()
-        self.neighbors_lock = threading.Lock()
 
         # Prints identifying the node
         print(f"Address: {ip}")
@@ -264,9 +265,9 @@ class UDPNode:
             print("The neighbors table is empty.")
 
         else:
-            for (ip, port), (mask, cost) in self.neighbors.items():
+            for (ip, port), (mask, cost, current_retries, _) in self.neighbors.items():
                 print(f"Address: {ip}:{port},",
-                      f"mask: {mask}, cost: {cost}.")
+                      f"mask: {mask}, cost: {cost}, current keep alive retries: {current_retries}/{KEEP_ALIVE_RETRIES}")
 
         self.reachability_table_lock.release()
 
