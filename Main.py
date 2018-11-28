@@ -45,16 +45,17 @@ def commands_from_csv(csv_file):
 
         print(f"UDPNode.py {this_node} {neighbors}")
 
-        os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
+        lol = True
+        if lol:
+            os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
+        else:
+            processes = list()
+            new_process = multiprocessing.Process(target=spawn_node, args=(node, edges))
+            processes.append(new_process)
 
-"""
-        processes = list()
-        new_process = multiprocessing.Process(target=spawn_node, args=(node, edges))
-        processes.append(new_process)
+            for process in processes:
+                process.start()
 
-        for process in processes:
-            process.start()
-#"""
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

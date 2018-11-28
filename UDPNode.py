@@ -7,6 +7,7 @@ import selectors
 import threading
 from AbstractNode import AbstractNode
 
+# Message types
 PKT_TYPE_UPDATE         = 1
 PKT_TYPE_KEEP_ALIVE     = 2
 PKT_TYPE_ACK_KEEP_ALIVE = 3
@@ -14,15 +15,24 @@ PKT_TYPE_FLOOD          = 4
 PKT_TYPE_DATA_MSG       = 5
 PKT_TYPE_COST_CHANGE    = 6
 PKT_TYPE_DEAD           = 7
+
+# Hops executed during a flood
 HOP_NUMBER = 50
 SKIPPED_UPDATES_AFTER_FLOOD = 3
-NODE_TYPE_STRING = "[IntAS Node]"
-BUFFER_SIZE = 2048  # Will be used when reading from a socket
+
+# Data size definitions
+TUPLE_COUNT_SIZE_BYTES      = 2
+TUPLE_SIZE_BYTES            = 10
+PKT_TYPE_SIZE_BYTES         = 2
+BUFFER_SIZE = 2048  # Will be used when reading from a socket TODO reads from the socket should be dynamic
+
+# Various timeouts
 SELECTOR_TIMEOUT = .5
-UPDATE_INTERVAL = 1
-HEADER_SIZE = 2
-TRIPLET_SIZE = 8
 SOCKET_TIMEOUT = 5.0
+
+# Interval at which updates at sent
+UPDATE_INTERVAL_SECONDS = 20
+
 
 class UDPNode:
 
@@ -40,11 +50,10 @@ class UDPNode:
         self.reachability_table = {}
         # Neighbors: ip, port : mask, cost, Timer obj, current_retries (0 if node is dead)
         self.neighbors = {}
-        for neighbor, n_cost in neighbors.items():
+        for (n_ip, n_mask, n_port), n_cost in neighbors.items():
             # neighbor = (ip, mask, port)
-            self.neighbors[(neighbor[0], neighbor[2])] = (neighbor[1], n_cost)
-            self.reachability_table[(neighbor[0], neighbor[1])] = ((neighbor[0], neighbor[2]), n_cost)
-            #self.reachability_table[(neighbor[0], neighbor[1])] = (mask, (neighbor[0], neighbor[2]), n_cost)
+            self.neighbors[(n_ip, n_port)] = (n_mask, n_cost)
+            self.reachability_table[(n_ip, n_port)] = (n_mask, (n_ip, n_port), n_cost)  # FIXME should not be filled yet
 
         # Locks
         self.reachability_table_lock = threading.Lock()
@@ -65,24 +74,13 @@ class UDPNode:
             threading.Thread(target=self.handle_incoming_connections)
         connection_handler_thread.start()
         while not self.stopper.is_set():
-            time.sleep(UPDATE_INTERVAL)
+            time.sleep(UPDATE_INTERVAL_SECONDS)
             self.update_route()
-        print("Finished the update msending loop!")
+        print("Finished the update sending loop!")
 
     def update_route(self):
         for (ip, port) in self.neighbors:
             self.send_reachability_table(ip, port)
-
-    def update_reachability_table(self, net_address, node_address, cost):
-        with self.neighbors_lock:
-            total_cost = cost + self.neighbors[node_address][1]
-
-        # Write to the reachability table,
-        # as many threads may perform read/write we need to lock it
-        with self.reachability_table_lock:
-            if net_address not in self.reachability_table or \
-                    self.reachability_table[net_address][1] > total_cost:
-                self.reachability_table[net_address] = (node_address, total_cost)
 
     def handle_incoming_connections(self):
         self.sock.bind((self.ip, self.port))
@@ -95,39 +93,24 @@ class UDPNode:
             for _ in events:
                 if self.stopper.is_set():
                     break
-                message, address = self.receive_message(self.sock, None)
-                self.decode_message(message, address)
+                self.receive_message(self.sock)
 
-    def disconnect_neighbor(self, address):
-        with self.neighbors_lock:
-            self.neighbors.pop(address, default=None)
-        self.disconnect_address(address)
-        # Probably should start a flood
-
-    def disconnect_address(self, address):
-        self.reachability_table_lock.acquire()
-        # Generate a new list without address
-        self.reachability_table = \
-            {key: value
-             for key, value in self.reachability_table.items()
-             if value[0] != address}
-        self.reachability_table_lock.release()
-        print(f"DISCONNECT: Deleting {address} table entries")
-
-    def receive_message(self, connection, address):
+    def receive_message(self, connection):
         # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
         message, address = connection.recvfrom(BUFFER_SIZE)
         print(f"MESSAGE: Connected with {address}")
-        message_type = message[0]
+
+        message_type = int.from_bytes(message[0:PKT_TYPE_SIZE_BYTES], byteorder='big', signed=False)
 
         if message_type == PKT_TYPE_UPDATE:
             if self.updates_to_ignore > 0:
                 self.updates_to_ignore -= 1
-                return [], ""
-            triplet_count = struct.unpack('!H', message[1:3])[0]
-            print(f"MESSAGE: Received of type UPDATE with {triplet_count} triplets.")
-            # Return a buffer with only the triplets, omitting the header
-            return message[3:], address
+                return
+            tuple_count = struct.unpack('!H', message[PKT_TYPE_SIZE_BYTES:PKT_TYPE_SIZE_BYTES + 2])[0]
+            print(f"MESSAGE: Received of type UPDATE of size {len(message)} with {tuple_count} tuples.")
+            # Decode the received tuples and update the reachability table if necessary
+            self.decode_tuples(message[PKT_TYPE_SIZE_BYTES + TUPLE_COUNT_SIZE_BYTES:], address)
+
         elif message_type == PKT_TYPE_KEEP_ALIVE:
             print("MESSAGE: Received of type KEEP_ALIVE")
             self.send_ack_keep_alive(address[0], address[1])
@@ -143,7 +126,6 @@ class UDPNode:
         if self.updates_to_ignore > 0:
             self.updates_to_ignore -= 1
         # TODO: handle all the other cases
-        return [], ""
 
     def send_message(self, ip, port, message):
         print(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
@@ -152,38 +134,80 @@ class UDPNode:
     def send_reachability_table(self, ip, port):
         self.reachability_table_lock.acquire()
         table_size = len(self.reachability_table)
-        encoded_message = bytearray(3 + TRIPLET_SIZE*table_size)
-        struct.pack_into("!B", encoded_message, 0, PKT_TYPE_UPDATE)
-        struct.pack_into("!H", encoded_message, 1, table_size)
-        offset = 3
-        for (r_ip, r_mask), (_, r_cost) in self.reachability_table.items():
+        encoded_message = bytearray(PKT_TYPE_SIZE_BYTES + TUPLE_COUNT_SIZE_BYTES + TUPLE_SIZE_BYTES * table_size)
+
+        # 2 bytes for the message type
+        struct.pack_into("!H", encoded_message, 0, PKT_TYPE_UPDATE)
+
+        # 2 bytes for the amount of tuples
+        struct.pack_into("!H", encoded_message, PKT_TYPE_SIZE_BYTES, table_size)
+
+        # Iterate the reachability table, writing each tuple to the encoded_message buffer
+        offset = PKT_TYPE_SIZE_BYTES + TUPLE_COUNT_SIZE_BYTES  # will to the next empty space in the buffer
+        for (r_ip, r_port), (r_mask, _, r_cost) in self.reachability_table.items():
             ip_tuple = tuple([int(tok) for tok in r_ip.split('.')])
-            encoded_message[offset:offset+TRIPLET_SIZE] = self.encode_triplet(ip_tuple, r_mask, r_cost)
-            offset += TRIPLET_SIZE
+            encoded_message[offset:offset + TUPLE_SIZE_BYTES] = self.encode_tuple(ip_tuple, r_port, r_mask, r_cost)
+            offset += TUPLE_SIZE_BYTES
         self.reachability_table_lock.release()
         if table_size > 0:
             self.send_message(ip, port, encoded_message)
 
-    def encode_triplet(self, address, net_mask, cost):
-        message = bytearray(AbstractNode.TRIPLET_SIZE)
-        # Each triplet is encoded with the following 8-byte format:
-        # BBBB (4 bytes) network address
+    def encode_tuple(self, ip, port, net_mask, cost):
+        message = bytearray(TUPLE_SIZE_BYTES)
+        # Each tuple is encoded with the following 10-byte format:
+        # BBBB (4 bytes) ip address (one B byte for each integer in the address)
         #  B   (1 byte)  subnet mask
-        #  I   (4 bytes) cost.
-        #      The cost should only be 3 bytes, this is handled below.
-        struct.pack_into('!BBBBB', message, 0,
-                         address[0], address[1],
-                         address[2], address[3],
-                         net_mask)
+        #  H   (2 bytes) port
+        #  I   (4 bytes) cost
+        #      The cost should only be 3 (not 4) bytes, this is handled below.
+        struct.pack_into('!BBBBBH', message, 0,
+                         ip[0], ip[1],
+                         ip[2], ip[3],
+                         net_mask, port)
 
         # Pack the cost into a 4 byte buffer
         cost_bytes = struct.pack('!I', cost)
 
         # Write the cost into the message buffer, copying only 3 bytes and omitting 1
-        # The least significant byte is the one omitted because its encoded
-        # as big endian
-        message[5:8] = cost_bytes[1:]
+        # The least significant byte is the one omitted because its encoded as big endian
+        message[7:] = cost_bytes[1:]
+
         return message
+
+    def decode_tuples(self, message, origin_node):
+        offset = 0
+        tuple_bytes = bytearray(10)
+        while offset < len(message):
+            # Unpack the binary
+            tuple_bytes = struct.unpack('!BBBBBBBBBB', message[offset:offset+TUPLE_SIZE_BYTES])
+
+            # Get each of the triplet's values
+            ip_bytes = tuple_bytes[:4]
+            ip = f"{ip_bytes[0]}.{ip_bytes[1]}.{ip_bytes[2]}.{ip_bytes[3]}"
+            mask = tuple_bytes[4]
+            port = int.from_bytes(tuple_bytes[5:7], byteorder='big', signed=False)
+            cost = int.from_bytes(tuple_bytes[7:], byteorder='big', signed=False)
+
+            offset += TUPLE_SIZE_BYTES
+            print(f"ADDRESS: {ip}" +
+                  f", SUBNET MASK: {mask}, COST: {cost}")
+
+            self.update_reachability_table(ip, port, mask, cost, origin_node)
+
+    def update_reachability_table(self, ip, port, mask, cost, through_node):
+        with self.neighbors_lock:
+            total_cost = cost + self.neighbors[through_node][1]
+
+        # Write to the reachability table,
+        # as many threads may perform read/write we need to lock it
+        with self.reachability_table_lock:
+            if (ip, port) not in self.reachability_table or self.reachability_table[(ip, port)][2] > total_cost:
+                self.reachability_table[(ip, port)] = (mask, through_node, total_cost)
+
+    def disconnect_address(self, ip, port):
+        with self.reachability_table_lock:
+            del self.reachability_table[(ip, port)]
+        print(f"DISCONNECT: Deleted {ip}:{port} from the reachability table.")
 
     def send_flood_message(self, hops):
         message = bytearray(2)
@@ -215,24 +239,6 @@ class UDPNode:
             self.sock.sendto(close_message, address)
         self.reachability_table_lock.release()
 
-    def decode_message(self, message, address):
-        offset = 0
-        while offset < len(message):
-            # Unpack the binary
-            triplet = struct.unpack('!BBBBBBBB', message[offset:offset+8])
-
-            # Get each of the triplet's values
-            ip_bytes = triplet[:4]
-            ip = f"{ip_bytes[0]}.{ip_bytes[1]}.{ip_bytes[2]}.{ip_bytes[3]}"
-            mask = triplet[4]
-            cost = int.from_bytes(triplet[5:], byteorder='big', signed=False)
-
-            offset += TRIPLET_SIZE
-            print(f"ADDRESS: {ip}" +
-                  f", SUBNET MASK: {mask}, COST: {cost}")
-            net_address = (ip, mask)
-            self.update_reachability_table(net_address, address, cost)
-
     def print_reachability_table(self):
         print("Current reachability table:")
         self.reachability_table_lock.acquire()
@@ -241,8 +247,8 @@ class UDPNode:
             print("The reachability table is empty.")
 
         else:
-            for (ip, port), ((ip2, port2), cost) in self.reachability_table.items():
-                print(f"Destiny: {ip}:{port},",
+            for (ip, port), (mask, (ip2, port2), cost) in self.reachability_table.items():
+                print(f"Destiny: {ip}:{port}/{mask},",
                       f"through: {ip2}:{port2}, cost: {cost}.")
 
         self.reachability_table_lock.release()
@@ -270,7 +276,6 @@ if __name__ == "__main__":
     neighbors_string = {}
     for i in range(1, (len(sys.argv) - 4) // 4 + 1):
         index = i*4
-        print(f"{sys.argv[index]} {sys.argv[index+1]} {sys.argv[index+2]} {int(sys.argv[index+3])}")
         neighbors_string[sys.argv[index], int(sys.argv[index + 1]), int(sys.argv[index + 2])] = int(sys.argv[index + 3])
     node = UDPNode(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), neighbors_string)
     node.start_node()
