@@ -2,7 +2,7 @@
 import sys
 import struct
 import socket
-import selectors
+import queue
 import threading
 import utility
 import time
@@ -27,9 +27,10 @@ PKT_TYPE_SIZE         = 1
 BUFFER_SIZE = 2048  # Will be used when reading from a socket TODO reads from the socket should be dynamic
 
 # Time intervals in seconds
-SEND_TABLE_UPDATE_INTERVAL = 1
-SEND_KEEP_ALIVE_INTERVAL = SEND_TABLE_UPDATE_INTERVAL * 2
 SEND_NODE_AWAKEN_INTERVAL = 0.5
+SEND_TABLE_UPDATE_INTERVAL = 10  # 30
+SEND_KEEP_ALIVE_INTERVAL = 5  # SEND_TABLE_UPDATE_INTERVAL * 2
+IGNORE_AFTER_FLOOD_INTERVAL = 5  # SEND_TABLE_UPDATE_INTERVAL * 3
 
 # Various timeouts in seconds
 SOCKET_TIMEOUT = 0.05
@@ -47,8 +48,7 @@ class UDPNode:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((self.ip, self.port))
         self.sock.setblocking(True)
-
-        self.updates_to_ignore = 0
+        self.sock.settimeout(SOCKET_TIMEOUT)
 
         # Structures
         # Reachability table: ip, port : mask, (ip, port), cost
@@ -61,16 +61,23 @@ class UDPNode:
         # Used to wake up nodes
         self.unawakened_neighbors = list(self.neighbors.keys())
 
+        # Queue to hold incoming messages
+        # Will be flushed when encountering a flood
+        self.message_queue = queue.Queue()
+
         # Locks
         self.reachability_table_lock = threading.Lock()
         self.neighbors_lock = threading.Lock()
+        self.message_queue_lock = threading.Lock()
 
         # Events
         self.stopper = threading.Event()
+        self.ignore_updates = threading.Event()
 
         # Threads
-        self.neighbor_init_thread = threading.Thread(target=self.neighbor_init_loop)
         self.connection_handler_thread = threading.Thread(target=self.handle_incoming_connections_loop)
+        self.neighbor_init_thread = threading.Thread(target=self.neighbor_init_loop)
+        self.message_reader_thread = threading.Thread(target=self.read_messages_loop)
         self.keep_alive_handler_thread = threading.Thread(target=self.send_keep_alive_loop)
         self.update_handler_thread = threading.Thread(target=self.send_updates_loop)
         self.command_handler_thread = threading.Thread(target=self.handle_console_commands)
@@ -90,17 +97,38 @@ class UDPNode:
         # Start the thread that handles incoming messages
         self.connection_handler_thread.start()
 
+        # Start the thread that reads messages and puts them in a queue
+        self.message_reader_thread.start()
+
         # Start the thread that checks if the node's neighbors are alive
         self.neighbor_init_thread.start()
 
         # Start the thread that will listen and respond to console commands
-        #self.command_handler_thread.start()
+        self.command_handler_thread.start()
 
         # Start the thread that manages keep alives
-        #self.keep_alive_handler_thread.start()
+        self.keep_alive_handler_thread.start()
 
         # This thread will periodically send updates
         self.update_handler_thread.start()
+
+    def read_messages_loop(self):
+        while not self.stopper.is_set():
+            try:
+                message, address = self.sock.recvfrom(BUFFER_SIZE)
+            except socket.timeout:
+                continue
+            except ConnectionResetError:
+                utility.log_message("Received a Windows exception informing us that a connection died...")
+                continue
+
+            if self.ignore_updates.is_set():
+                # Continue without putting the message in the queue if a flood occurred recently
+                continue
+
+            with self.message_queue_lock:
+                self.message_queue.put((message, address))
+        utility.log_message("Finished the read messages loop!")
 
     def neighbor_init_loop(self):
         while not self.stopper.wait(SEND_NODE_AWAKEN_INTERVAL) and self.unawakened_neighbors:
@@ -166,17 +194,13 @@ class UDPNode:
     def receive_message(self, connection):
         # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
         try:
-            message, address = connection.recvfrom(BUFFER_SIZE)
-        except ConnectionResetError:
-            utility.log_message("Windows is telling us a connection died, oh bother...")
+            message, address = self.message_queue.get(block=True, timeout=SOCKET_TIMEOUT)
+        except queue.Empty:
             return
 
         message_type = int.from_bytes(message[0:PKT_TYPE_SIZE], byteorder='big', signed=False)
 
         if message_type == PKT_TYPE_UPDATE:
-            if self.updates_to_ignore > 0:
-                self.updates_to_ignore -= 1
-                return
             tuple_count = struct.unpack('!H', message[PKT_TYPE_SIZE:PKT_TYPE_SIZE + 2])[0]
             utility.log_message(f"Received a table update from {address[0]}:{address[1]} of size "
                                 f"{len(message)} with {tuple_count} tuples.")
@@ -203,21 +227,20 @@ class UDPNode:
                     pass
 
                 # If the node was thought dead re-add it to the reachability table
-                if neighbor[2] == 0:
-                    with self.reachability_table_lock:
-                        self.reachability_table[address] = (neighbor[0], address, neighbor[1])
+                with self.reachability_table_lock:
+                    self.reachability_table[address] = (neighbor[0], address, neighbor[1])
 
                 # Reset the retry number
                 self.neighbors[address] = (neighbor[0], neighbor[1], KEEP_ALIVE_RETRIES, None)
 
         elif message_type == PKT_TYPE_FLOOD:
             hops = struct.unpack("!B", message[1:2])[0]
-            utility.log_message(f"Received a FLOOD: with {hops} hops from {address[0]}:{address[1]}.\n"
-                                f"Flushing reachability table...")
-            with self.reachability_table_lock:
-                self.reachability_table.clear()
+            utility.log_message(f"Received a FLOOD: with {hops} hops remaining from {address[0]}:{address[1]}."
+                                f"\nFlushing reachability table..."
+                                f"\nWill ignore updates for {IGNORE_AFTER_FLOOD_INTERVAL} seconds.")
+
+            # Continue the flood with one less hop
             self.send_flood_message(hops - 1)
-            self.updates_to_ignore = SKIPPED_UPDATES_AFTER_FLOOD + 1
 
         elif message_type == PKT_TYPE_DATA_MSG:
             ip_bytes = message[1:5]
@@ -233,9 +256,28 @@ class UDPNode:
                                     f"{address[0]}:{address[1]}! Rerouting...")
                 self.send_data_message(ip, port, str_message)
 
-        if self.updates_to_ignore > 0:
-            self.updates_to_ignore -= 1
-        # TODO: handle all the other cases
+        elif message_type == PKT_TYPE_DEAD:
+            utility.log_message(f"Neighbor {address[0]}:{address[1]} will DIE!"
+                                f"\nFlushing reachability table and starting flood..."
+                                f"\nWill ignore updates for {IGNORE_AFTER_FLOOD_INTERVAL} seconds.")
+
+            # Start a flood with neighbors
+            self.send_flood_message(HOP_NUMBER)
+
+        elif message_type == PKT_TYPE_COST_CHANGE:
+            utility.log_message(f"Neighbor changed cost! Flushing table and starting flood..."
+                                f"\nWill ignore updates for {IGNORE_AFTER_FLOOD_INTERVAL} seconds.")
+            # Start a flood with neighbors
+            self.send_flood_message(HOP_NUMBER)
+
+    def reset_ignore_updates(self):
+        utility.log_message("Resuming message listening...")
+
+        self.ignore_updates.clear()
+
+        # Awaken neighbors again
+        self.neighbor_init_thread = threading.Thread(target=self.neighbor_init_loop)
+        self.neighbor_init_thread.start()
 
     def send_message(self, ip, port, message):
         utility.log_message(f"Sending {len(message)} bytes to {ip}:{port}")
@@ -357,6 +399,18 @@ class UDPNode:
         struct.pack_into("!B", message, 1, hops)
         for ip, port in self.neighbors:
             self.send_message(ip, port, message)
+        # Set the event to indicate that updates should be ignored
+        self.ignore_updates.set()
+
+        # Clear the reachability table and message queue
+        with self.reachability_table_lock:
+            self.reachability_table.clear()
+        with self.message_queue_lock:
+            self.message_queue = queue.Queue()
+
+        # Start a timer to clear the previous event so updates can continue
+        continue_updates_timer = threading.Timer(IGNORE_AFTER_FLOOD_INTERVAL, self.reset_ignore_updates)
+        continue_updates_timer.start()
 
     def send_ack_keep_alive(self, ip, port):
         message = bytearray(1)
@@ -386,17 +440,28 @@ class UDPNode:
         else:
             utility.log_message(f"Received a message headed for {ip}:{port} but this node cannot reach it!")
 
+    def send_node_death_message(self, ip, port):
+        message = bytearray(1)
+        struct.pack_into("!B", message, 0, PKT_TYPE_DEAD)
+        self.send_message(ip, port, message)
+
     def stop_node(self):
-        utility.log_message("EXIT: Sending close message")
+        utility.log_message("EXIT: Killing node, waiting for threads to finish...")
 
         # Set this flag to false, stopping all loops
         self.stopper.set()
 
+        # Join all threads except command console handler, as this is that thread
+        self.connection_handler_thread.join()
+        self.neighbor_init_thread.join()
+        self.message_reader_thread.join()
+        self.keep_alive_handler_thread.join()
+        self.update_handler_thread.join()
+
+        # Send a message to all neighbors indicating that this node will die
         self.reachability_table_lock.acquire()
-        for _, value in self.reachability_table.items():
-            address = value[0]
-            close_message = struct.pack("!H", 0)
-            self.sock.sendto(close_message, address)
+        for ip, port in self.neighbors:
+            self.send_node_death_message(ip, port)
         self.reachability_table_lock.release()
 
     def print_reachability_table(self):
