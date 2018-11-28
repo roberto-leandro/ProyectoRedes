@@ -43,10 +43,8 @@ def commands_from_csv(csv_file):
             elif node_b == node:
                 neighbors += f"{node_a[0]} {node_a[1]} {node_a[2]} {cost} "
 
-        print(f"UDPNode.py {this_node} {neighbors}")
-
         lol = True
-        if not lol:
+        if lol:
             os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
         else:
             processes = list()
