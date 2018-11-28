@@ -27,14 +27,13 @@ PKT_TYPE_SIZE         = 1
 BUFFER_SIZE = 2048  # Will be used when reading from a socket TODO reads from the socket should be dynamic
 
 # Time intervals in seconds
-SEND_TABLE_UPDATE_INTERVAL = 0.5
-SEND_KEEP_ALIVE_INTERVAL = 3000  # SEND_TABLE_UPDATE_INTERVAL*1.5
+SEND_TABLE_UPDATE_INTERVAL = 1
+SEND_KEEP_ALIVE_INTERVAL = SEND_TABLE_UPDATE_INTERVAL * 2
+SEND_NODE_AWAKEN_INTERVAL = 0.5
 
-# Various timeouts
-SELECTOR_TIMEOUT = .5
-SOCKET_TIMEOUT = 5.0
-NODE_AWAKEN_TIMEOUT = 3
-KEEP_ALIVE_TIMEOUT = 0.5
+# Various timeouts in seconds
+SOCKET_TIMEOUT = 0.05
+KEEP_ALIVE_TIMEOUT = 0.05
 KEEP_ALIVE_RETRIES = 5
 
 
@@ -47,7 +46,7 @@ class UDPNode:
         self.mask = mask
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((self.ip, self.port))
-        self.sock.setblocking(True) #TODO should be true
+        self.sock.setblocking(True)
 
         self.updates_to_ignore = 0
 
@@ -58,7 +57,6 @@ class UDPNode:
         self.neighbors = {}
         for (n_ip, n_mask, n_port), n_cost in neighbors.items():
             self.neighbors[(n_ip, n_port)] = (n_mask, n_cost, 0, None)
-            #self.reachability_table[(n_ip, n_port)] = (n_mask, (n_ip, n_port), n_cost)  # FIXME should not be filled yet
 
         # Used to wake up nodes
         self.unawakened_neighbors = list(self.neighbors.keys())
@@ -89,11 +87,14 @@ class UDPNode:
         utility.log_message("    printNeighbors\n")
 
     def start_node(self):
+        # Start the thread that handles incoming messages
+        self.connection_handler_thread.start()
+
         # Start the thread that checks if the node's neighbors are alive
         self.neighbor_init_thread.start()
 
         # Start the thread that will listen and respond to console commands
-        self.command_handler_thread.start()
+        #self.command_handler_thread.start()
 
         # Start the thread that manages keep alives
         #self.keep_alive_handler_thread.start()
@@ -101,18 +102,14 @@ class UDPNode:
         # This thread will periodically send updates
         self.update_handler_thread.start()
 
-        # Start the thread that handles incoming messages
-        self.connection_handler_thread.start()
-
     def neighbor_init_loop(self):
-        while not self.stopper.wait(NODE_AWAKEN_TIMEOUT) and self.unawakened_neighbors:
+        while not self.stopper.wait(SEND_NODE_AWAKEN_INTERVAL) and self.unawakened_neighbors:
             for (ip, port) in self.unawakened_neighbors:
                 utility.log_message(f"Waking {ip}:{port}")
                 self.send_keep_alive(ip, port)
         utility.log_message("All neighbors have awakened!")
 
     def send_updates_loop(self):
-        time.sleep(4)
         self.send_update()
         a = 0
         while not self.stopper.wait(SEND_TABLE_UPDATE_INTERVAL):
@@ -171,7 +168,7 @@ class UDPNode:
         try:
             message, address = connection.recvfrom(BUFFER_SIZE)
         except ConnectionResetError:
-            utility.log_message("the thing happened oh no")
+            utility.log_message("Windows is telling us a connection died, oh bother...")
             return
 
         message_type = int.from_bytes(message[0:PKT_TYPE_SIZE], byteorder='big', signed=False)
@@ -181,17 +178,17 @@ class UDPNode:
                 self.updates_to_ignore -= 1
                 return
             tuple_count = struct.unpack('!H', message[PKT_TYPE_SIZE:PKT_TYPE_SIZE + 2])[0]
-            utility.log_message(f"MESSAGE: Received a table update from {address[0]}:{address[1]} of size "
+            utility.log_message(f"Received a table update from {address[0]}:{address[1]} of size "
                                 f"{len(message)} with {tuple_count} tuples.")
             # Decode the received tuples and update the reachability table if necessary
             self.decode_tuples(message[PKT_TYPE_SIZE + TUPLE_COUNT_SIZE:], address)
 
         elif message_type == PKT_TYPE_KEEP_ALIVE:
-            utility.log_message(f"MESSAGE: Received a keep alive from {address[0]}:{address[1]}.")
+            utility.log_message(f"Received a keep alive from {address[0]}:{address[1]}.")
             self.send_ack_keep_alive(address[0], address[1])
 
         elif message_type == PKT_TYPE_ACK_KEEP_ALIVE:
-            utility.log_message(f"MESSAGE: Received a keep alive ack from {address[0]}:{address[1]}.")
+            utility.log_message(f"Received a keep alive ack from {address[0]}:{address[1]}.")
             # Check if this is the first time the node has replied
             if address in self.unawakened_neighbors:
                 utility.log_message(f"Neighbor {address[0]}:{address[1]} has woken up!")
@@ -223,9 +220,6 @@ class UDPNode:
             self.updates_to_ignore = SKIPPED_UPDATES_AFTER_FLOOD + 1
 
         elif message_type == PKT_TYPE_DATA_MSG:
-            # Get the message's destination and size
-            message_bytes = struct.unpack('!BBBBHB', message[PKT_TYPE_SIZE:PKT_TYPE_SIZE+7])
-
             ip_bytes = message[1:5]
             ip = f"{ip_bytes[0]}.{ip_bytes[1]}.{ip_bytes[2]}.{ip_bytes[3]}"
             port = int.from_bytes(message[5:7], byteorder='big', signed=False)
@@ -235,7 +229,7 @@ class UDPNode:
             if ip == self.ip and port == self.port:
                 utility.log_message(f"Received the data message {str_message} from {address[0]}:{address[1]}!")
             else:
-                utility.log_message(f"Received the mesage {str_message} headed for {ip}:{port} from "
+                utility.log_message(f"Received the message {str_message} headed for {ip}:{port} from "
                                     f"{address[0]}:{address[1]}! Rerouting...")
                 self.send_data_message(ip, port, str_message)
 
@@ -244,12 +238,10 @@ class UDPNode:
         # TODO: handle all the other cases
 
     def send_message(self, ip, port, message):
-        utility.log_message(f"MESSAGE: Sending {len(message)} bytes to {ip}:{port}")
+        utility.log_message(f"Sending {len(message)} bytes to {ip}:{port}")
         self.sock.sendto(message, (ip, port))
 
     def send_reachability_table(self, ip, port):
-        utility.log_message(f"{self.ip}:{self.port} called send rch table to send to {ip}:{port}")
-
         self.reachability_table_lock.acquire()
         table_size = len(self.reachability_table)
 
@@ -258,9 +250,8 @@ class UDPNode:
             table_size -= 1
 
         if table_size <= 0:
+            self.reachability_table_lock.release()
             return
-
-        utility.log_message(f"Sending {table_size} tuples...")
 
         encoded_message = bytearray(PKT_TYPE_SIZE + TUPLE_COUNT_SIZE + TUPLE_SIZE * table_size)
 
@@ -274,12 +265,8 @@ class UDPNode:
         offset = PKT_TYPE_SIZE + TUPLE_COUNT_SIZE  # will to the next empty space in the buffer
         for (r_ip, r_port), (r_mask, _, r_cost) in self.reachability_table.items():
             # Add entry  to message only if it does not refer to the receiving node
-            utility.log_message(f"\n\n\nENCODING {r_ip}:{r_port} to send to {ip}:{port}"
-                                f"\n{r_ip} same as {ip}? {r_ip==ip}"
-                                f"\n{r_port} same as {port}? {r_port==port}\n\n\n")
             if r_ip == ip and r_port == port:
                 continue
-            utility.log_message("\n\nhere\n\n")
             ip_tuple = tuple([int(tok) for tok in r_ip.split('.')])
             encoded_message[offset:offset + TUPLE_SIZE] = utility.encode_tuple(ip_tuple, r_port, r_mask, r_cost)
             offset += TUPLE_SIZE
@@ -287,32 +274,13 @@ class UDPNode:
 
         self.send_message(ip, port, encoded_message)
 
-        offset = 3
-        tuple_bytes = bytearray(10)
-        utility.log_message(f"gonna decode my own message of {len(encoded_message)} bytes")
-        while offset < len(encoded_message):
-            # Unpack the binary
-            tuple_bytes = struct.unpack('!BBBBBBBBBB', encoded_message[offset:offset + TUPLE_SIZE])
-
-            # Get each of the tuple's values
-            ip_bytes = tuple_bytes[:4]
-            ip = f"{ip_bytes[0]}.{ip_bytes[1]}.{ip_bytes[2]}.{ip_bytes[3]}"
-            mask = tuple_bytes[4]
-            port = int.from_bytes(tuple_bytes[5:7], byteorder='big', signed=False)
-            cost = int.from_bytes(tuple_bytes[7:], byteorder='big', signed=False)
-
-            offset += TUPLE_SIZE
-            utility.log_message(f"GONNA SEND: {ip}, SUBNET MASK: {mask}, COST: {cost}")
-
-
-
     def handle_console_commands(self):
         while not self.stopper.is_set():
             try:
                 pass
                 command = input("Enter your command...\n> ")
             except EOFError:
-                utility.log_message(f"EOFILE {self.ip}")
+                utility.log_message(f"EOFile while expecting user input...")
                 continue
             command = command.strip().split(" ")
 
@@ -343,6 +311,7 @@ class UDPNode:
                 utility.log_message("Unrecognized command, try again.")
 
     def decode_tuples(self, message, origin_node):
+        # Ignore updates that do not originate from a neighbor
         if origin_node not in self.neighbors:
             utility.log_message(f"Discarding update from {origin_node[0]}:{origin_node[1]} as it is not a neighbor.")
             return
@@ -373,7 +342,7 @@ class UDPNode:
         # as many threads may perform read/write we need to lock it
         with self.reachability_table_lock:
             if (ip, port) not in self.reachability_table or self.reachability_table[(ip, port)][2] > total_cost:
-                utility.log_message(f"Gonna change the cost of {ip}:{port} because of {through_node}")
+                utility.log_message(f"Changing cost of {ip}:{port} passing through {through_node}.")
                 self.reachability_table[(ip, port)] = (mask, through_node, total_cost)
 
     def remove_reachability_table_entry(self, ip, port):
@@ -459,7 +428,7 @@ class UDPNode:
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
-        utility.log_message("Incorrect arg number")
+        utility.log_message("Incorrect argument number, exiting...")
         sys.exit(1)
 
     # Parse neighbors
