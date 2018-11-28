@@ -45,9 +45,9 @@ def commands_from_csv(csv_file):
 
         print(f"UDPNode.py {this_node} {neighbors}")
 
-        #os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
+        os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
 
-#"""
+"""
         processes = list()
         new_process = multiprocessing.Process(target=spawn_node, args=(node, edges))
         processes.append(new_process)

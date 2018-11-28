@@ -15,19 +15,9 @@ class AbstractNode(ABC):
     SOCKET_TIMEOUT = 5.0
 
     # Defined in the subclasses
-    SOCKET_TYPE = None
     NODE_TYPE_STRING = None
 
-    def __init__(self, ip, port):
-        self.port = port
-        self.ip = ip
-        self.reachability_table = {}
-        # Controls access to the shared table
-        self.reachability_table_lock = threading.Lock()
-        self.sock = socket.socket(socket.AF_INET, self.SOCKET_TYPE)
 
-        # Will be set when the node should be deleted
-        self.stopper = threading.Event()
 
     def start_node(self):
         """ Create two new threads
@@ -82,16 +72,7 @@ class AbstractNode(ABC):
             net_address = (ip, mask)
             self.update_reachability_table(net_address, address, cost)
 
-    def update_reachability_table(self, net_address, node_address, cost):
-        # Write to the reachability table,
-        # as many threads may perform read/write we need to lock it
-        self.reachability_table_lock.acquire()
 
-        if net_address not in self.reachability_table or \
-                self.reachability_table[net_address][1] > cost:
-            self.reachability_table[net_address] = (node_address, cost)
-
-        self.reachability_table_lock.release()
 
     @staticmethod
     def __get_valid_message_input():
