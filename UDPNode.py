@@ -131,8 +131,19 @@ class UDPNode:
                 # Continue without putting the message in the queue if a flood occurred recently
                 continue
 
-            with self.message_queue_lock:
-                self.message_queue.put((message, address))
+
+            message_type = int.from_bytes(message[0:PKT_TYPE_SIZE], byteorder='big', signed=False)
+            if message_type == PKT_TYPE_FLOOD or message_type == PKT_TYPE_DEAD:
+                # Flood messages have more priority and the queue will need to be no matter what so delete it and put
+                # the flood message first
+                with self.message_queue_lock:
+                    self.message_queue = queue.Queue()
+                    self.message_queue.put((message, address))
+
+            else:
+                # All other messages have the same priority
+                with self.message_queue_lock:
+                    self.message_queue.put((message, address))
         utility.log_message("Finished the read messages loop!", self)
 
     def find_awake_neighbors(self):
