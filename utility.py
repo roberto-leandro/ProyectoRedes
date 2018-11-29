@@ -3,10 +3,20 @@ import threading
 import UDPNode as Constants
 
 logging_lock = threading.Lock()
+PRINT_UPDATES = True
 
-
-def log_message(message):
+def log_message(message, node):
     with logging_lock:
+        with open(f"node_{node.ip}_{node.port}_log.txt", "a+") as log_file:
+            log_file.write(message + "\n")
+        if node.print_updates:
+            print(message)
+
+
+def log_message_force(message, node):
+    with logging_lock:
+        with open(f"node_{node.ip}_{node.port}_log.txt", "a+") as log_file:
+            log_file.write(message + "\n")
         print(message)
 
 
@@ -31,61 +41,3 @@ def encode_tuple(ip, port, net_mask, cost):
     message[7:] = cost_bytes[1:]
 
     return message
-
-
-def __get_valid_message_input():
-    def get_input():
-        new_input = input("Type the message to be sent as follows:\n" +
-                          "<IP address> <subnet mask> <cost>\n")
-        new_input = new_input.strip().split(' ')
-        return new_input
-
-    while True:
-        message = get_input()
-        if len(message) != 3:
-            print("Wrong number of tokens, expected 3 tokens with the format:")
-            print("x.x.x.x x x     Where x is a positive integer")
-            continue
-
-        address_token_list = message[0].strip().split('.')
-        try:
-            address_token_list = [int(tok) for tok in address_token_list]
-            net_mask = int(message[1])
-            cost = int(message[2])
-        except ValueError:
-            print("Unexpected input, expected input with format:")
-            print("x.x.x.x x x     Where x is a positive integer")
-            continue
-
-        if len(address_token_list) != 4:
-            print("Invalid address, expected address with format: x.x.x.x")
-            continue
-
-        is_address_valid = True
-        for token in address_token_list:
-            if token > 255:
-                print("Invalid address token, must be less than 255")
-                is_address_valid = False
-                break
-            elif token < 0:
-                print("Invalid address token, must be a positive integer")
-                is_address_valid = False
-                break
-        if not is_address_valid:
-            continue
-
-        if net_mask > 32:
-            print("Invalid network mask, expected less than 32")
-            continue
-        elif net_mask < 0:
-            print("Network mask must be a positive integer")
-            continue
-
-        if cost < 0:
-            print("Invalid cost, must be a positive integer")
-            continue
-        elif cost > 0xFF_FF_FF:  # max three bytes
-            print("Invalid cost, max number exceeded")
-            continue
-
-        return address_token_list, net_mask, cost
