@@ -28,9 +28,9 @@ BUFFER_SIZE = 2048  # Will be used when reading from a socket
 
 # Time intervals in seconds
 SEND_NODE_AWAKEN_INTERVAL = 0.5
-SEND_TABLE_UPDATE_INTERVAL = 15  # 30
-SEND_KEEP_ALIVE_INTERVAL = 2  # SEND_TABLE_UPDATE_INTERVAL * 2
-IGNORE_AFTER_FLOOD_INTERVAL = 5  # SEND_TABLE_UPDATE_INTERVAL * 3
+SEND_TABLE_UPDATE_INTERVAL = 30
+SEND_KEEP_ALIVE_INTERVAL = SEND_TABLE_UPDATE_INTERVAL * 2
+IGNORE_AFTER_FLOOD_INTERVAL = SEND_TABLE_UPDATE_INTERVAL * 3
 
 # Various timeouts in seconds
 SOCKET_TIMEOUT = 0.05
@@ -175,7 +175,7 @@ class UDPNode:
                     for (ip, port) in self.unawakened_neighbors:
                         # Set nodes as dead
                         neighbor = self.neighbors[ip, port]
-                        self.neighbors[ip, port] = (neighbor[1], neighbor[2], 0, None)
+                        self.neighbors[ip, port] = (neighbor[0], neighbor[1], 0, None)
 
                         # Add to string to inform user
                         unawakened_str += f"{ip}:{port} "
