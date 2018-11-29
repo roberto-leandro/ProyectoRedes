@@ -241,7 +241,7 @@ class UDPNode:
             self.receive_message(self.sock)
         utility.log_message("Finished the handle incoming connections loop!", self)
 
-    def receive_message(self, connection):
+    def receive_message(self):
         # Read enough bytes for the message, a standard packet does not exceed 1500 bytes
         try:
             message, address = self.message_queue.get(block=True, timeout=SOCKET_TIMEOUT)
