@@ -131,7 +131,6 @@ class UDPNode:
                 # Continue without putting the message in the queue if a flood occurred recently
                 continue
 
-
             message_type = int.from_bytes(message[0:PKT_TYPE_SIZE], byteorder='big', signed=False)
             if message_type == PKT_TYPE_FLOOD or message_type == PKT_TYPE_DEAD:
                 # Flood messages have more priority and the queue will need to be no matter what so delete it and put
@@ -149,37 +148,36 @@ class UDPNode:
     def find_awake_neighbors(self):
         # Halt infinite keep alives
         self.continue_keep_alives.clear()
-        with self.neighbors_lock:
+        # Assume all neighbors are dead
+        with self.unawakened_neighbors_lock:
+            self.unawakened_neighbors = list(self.neighbors.keys())
 
-            # Assume all neighbors are dead
+        # Try to find neighbors until they are all alive or the maximum amount of retries is met
+        current_tries = 0
+        while current_tries < KEEP_ALIVE_RETRIES and self.unawakened_neighbors:
+            current_tries += 1
             with self.unawakened_neighbors_lock:
-                self.unawakened_neighbors = list(self.neighbors.keys())
+                for (ip, port) in self.unawakened_neighbors:
+                    utility.log_message(f"Waking {ip}:{port}", self)
+                    self.send_keep_alive(ip, port)
 
-            # Try to find neighbors until they are all alive or the maximum amount of retries is met
-            current_tries = 0
-            while current_tries < KEEP_ALIVE_RETRIES and self.unawakened_neighbors:
-                current_tries += 1
-                with self.unawakened_neighbors_lock:
-                    for (ip, port) in self.unawakened_neighbors:
-                        utility.log_message(f"Waking {ip}:{port}", self)
-                        self.send_keep_alive(ip, port)
+            # Sleep for the timeout duration before trying again
+            time.sleep(KEEP_ALIVE_TIMEOUT)
 
-                # Sleep for the timeout duration before trying again
-                time.sleep(KEEP_ALIVE_TIMEOUT)
-
-            with self.unawakened_neighbors_lock:
-                if not self.unawakened_neighbors:
-                    utility.log_message("All neighbors have awakened!", self)
-                else:
-                    unawakened_str = "Unawoken neighbors: "
-                    for (ip, port) in self.unawakened_neighbors:
-                        # Set nodes as dead
+        with self.unawakened_neighbors_lock:
+            if not self.unawakened_neighbors:
+                utility.log_message("All neighbors have awakened!", self)
+            else:
+                unawakened_str = "Unawoken neighbors: "
+                for (ip, port) in self.unawakened_neighbors:
+                    # Set nodes as dead
+                    with self.neighbors_lock:
                         neighbor = self.neighbors[ip, port]
                         self.neighbors[ip, port] = (neighbor[0], neighbor[1], 0, None)
 
-                        # Add to string to inform user
-                        unawakened_str += f"{ip}:{port} "
-                    utility.log_message_force(unawakened_str, self)
+                    # Add to string to inform user
+                    unawakened_str += f"{ip}:{port} "
+                utility.log_message_force(unawakened_str, self)
 
         # Continue infinite keep alives
         self.continue_keep_alives.set()
@@ -202,7 +200,8 @@ class UDPNode:
                     if current_retries > 0:
                         utility.log_message(f"Sending keep alive to {ip}:{port}...", self)
 
-                        # Create a timer to implement the timeout, will execute code to handle the timeout after it triggers
+                        # Create a timer to implement the timeout, will execute code to handle the timeout after it
+                        # triggers
                         # If an ack is received this timer will be cancelled
                         timeout_timer = threading.Timer(KEEP_ALIVE_TIMEOUT,
                                                         self.handle_keep_alive_timeout, [], {"ip": ip, "port": port})
@@ -238,7 +237,7 @@ class UDPNode:
 
     def handle_incoming_connections_loop(self):
         while not self.stopper.is_set():
-            self.receive_message(self.sock)
+            self.receive_message()
         utility.log_message("Finished the handle incoming connections loop!", self)
 
     def receive_message(self):
@@ -249,6 +248,7 @@ class UDPNode:
             return
 
         message_type = int.from_bytes(message[0:PKT_TYPE_SIZE], byteorder='big', signed=False)
+        print(f"received type {message_type} from {address}")
 
         if message_type == PKT_TYPE_UPDATE:
             tuple_count = struct.unpack('!H', message[PKT_TYPE_SIZE:PKT_TYPE_SIZE + 2])[0]
@@ -285,7 +285,7 @@ class UDPNode:
 
         elif message_type == PKT_TYPE_FLOOD:
             hops = struct.unpack("!B", message[1:2])[0]
-            utility.log_message(f"Received a FLOOD: with {hops} hops remaining from {address[0]}:{address[1]}."
+            utility.log_message(f"Received a FLOOD with {hops} hops remaining from {address[0]}:{address[1]}."
                                 f"\nFlushing reachability table..."
                                 f"\nWill ignore updates for {IGNORE_AFTER_FLOOD_INTERVAL} seconds.", self)
 
@@ -349,7 +349,6 @@ class UDPNode:
         self.find_awake_neighbors()
 
     def send_message(self, ip, port, message):
-        utility.log_message(f"Sending {len(message)} bytes to {ip}:{port}", self)
         self.sock.sendto(message, (ip, port))
 
     def send_reachability_table(self, ip, port):
@@ -383,6 +382,7 @@ class UDPNode:
             offset += TUPLE_SIZE
         self.reachability_table_lock.release()
 
+        utility.log_message(f"Sending reachability table of {len(encoded_message)} bytes to {ip}:{port}", self)
         self.send_message(ip, port, encoded_message)
 
     def handle_console_commands(self):
@@ -496,6 +496,7 @@ class UDPNode:
         struct.pack_into("!B", message, 0, PKT_TYPE_FLOOD)
         struct.pack_into("!B", message, 1, hops)
         for ip, port in self.neighbors:
+            utility.log_message(f"Sending flood message of {len(message)} bytes to {ip}:{port}", self)
             self.send_message(ip, port, message)
         # Set the event to indicate that updates should be ignored
         self.ignore_updates.set()
@@ -516,6 +517,8 @@ class UDPNode:
     def send_ack_keep_alive(self, ip, port):
         message = bytearray(1)
         struct.pack_into("!B", message, 0, PKT_TYPE_ACK_KEEP_ALIVE)
+
+        utility.log_message(f"Sending keep alive ACK message to {len(message)} bytes to {ip}:{port}", self)
         self.send_message(ip, port, message)
 
     def send_cost_change(self, ip, port, new_cost):
@@ -524,11 +527,14 @@ class UDPNode:
 
         new_cost_bytes = bytearray(4)
         struct.pack_into("!I", new_cost_bytes, 0, new_cost)
+
+        utility.log_message(f"Sending cost change message of {len(message)} bytes to {ip}:{port}", self)
         self.send_message(ip, port, message+new_cost_bytes[1:])
 
     def send_keep_alive(self, ip, port):
         message = bytearray(1)
         struct.pack_into("!B", message, 0, PKT_TYPE_KEEP_ALIVE)
+        utility.log_message(f"Sending keep alive message of {len(message)} bytes to {ip}:{port}", self)
         self.send_message(ip, port, message)
 
     def send_data_message(self, ip, port, str_message):
@@ -553,6 +559,8 @@ class UDPNode:
     def send_node_death_message(self, ip, port):
         message = bytearray(1)
         struct.pack_into("!B", message, 0, PKT_TYPE_DEAD)
+
+        utility.log_message(f"Sending node death message of {len(message)} bytes to {ip}:{port}", self)
         self.send_message(ip, port, message)
 
     def stop_node(self):
@@ -576,7 +584,6 @@ class UDPNode:
             self.update_handler_thread.join()
         except RuntimeError:
             utility.log_message_force("Update handler thread had not been started, no join needed.", self)
-
 
         # Send a message to all neighbors indicating that this node will die
         self.reachability_table_lock.acquire()
@@ -606,10 +613,11 @@ class UDPNode:
 
         else:
             for (ip, port), (mask, cost, current_retries, _) in self.neighbors.items():
-                utility.log_message_force(f"Address: {ip}:{port}, mask: {mask}, cost: {cost}, "
-                                    f"current keep alive retries: {current_retries}/{KEEP_ALIVE_RETRIES}", self)
+                utility.log_message_force(f"Address: {ip}:{port}, mask: {mask}, cost: {cost}, current keep alive "
+                                          f"retries: {current_retries}/{KEEP_ALIVE_RETRIES}", self)
 
         self.reachability_table_lock.release()
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
