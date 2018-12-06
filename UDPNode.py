@@ -248,7 +248,6 @@ class UDPNode:
             return
 
         message_type = int.from_bytes(message[0:PKT_TYPE_SIZE], byteorder='big', signed=False)
-        print(f"received type {message_type} from {address}")
 
         if message_type == PKT_TYPE_UPDATE:
             tuple_count = struct.unpack('!H', message[PKT_TYPE_SIZE:PKT_TYPE_SIZE + 2])[0]
