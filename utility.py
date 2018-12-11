@@ -7,16 +7,16 @@ PRINT_UPDATES = True
 
 def log_message(message, node):
     with logging_lock:
-        with open(f"node_{node.ip}_{node.port}_log.txt", "a+") as log_file:
-            log_file.write(message + "\n")
+        # with open(f"node_{node.ip}_{node.port}_log.txt", "a+") as log_file:
+        #     log_file.write(message + "\n")
         if node.print_updates:
             print(message)
 
 
 def log_message_force(message, node):
     with logging_lock:
-        with open(f"node_{node.ip}_{node.port}_log.txt", "a+") as log_file:
-            log_file.write(message + "\n")
+        # with open(f"node_{node.ip}_{node.port}_log.txt", "a+") as log_file:
+        #    log_file.write(message + "\n")
         print(message)
 
 

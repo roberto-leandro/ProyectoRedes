@@ -17,7 +17,7 @@ PKT_TYPE_COST_CHANGE    = 6
 PKT_TYPE_DEAD           = 7
 
 # Hops executed during a flood
-HOP_NUMBER = 50
+HOP_NUMBER = 10
 SKIPPED_UPDATES_AFTER_FLOOD = 3
 
 # Data size definitions in bytes
@@ -33,9 +33,9 @@ SEND_KEEP_ALIVE_INTERVAL = SEND_TABLE_UPDATE_INTERVAL * 2
 IGNORE_AFTER_FLOOD_INTERVAL = SEND_TABLE_UPDATE_INTERVAL * 3
 
 # Various timeouts in seconds
-SOCKET_TIMEOUT = 0.05
-KEEP_ALIVE_TIMEOUT = 0.05
-KEEP_ALIVE_RETRIES = 5
+SOCKET_TIMEOUT = 1
+KEEP_ALIVE_TIMEOUT = 200
+KEEP_ALIVE_RETRIES = 100
 
 
 class UDPNode:
@@ -284,12 +284,17 @@ class UDPNode:
 
         elif message_type == PKT_TYPE_FLOOD:
             hops = struct.unpack("!B", message[1:2])[0]
-            utility.log_message(f"Received a FLOOD with {hops} hops remaining from {address[0]}:{address[1]}."
+            utility.log_message_force(f"Received a FLOOD with {hops} hops remaining from {address[0]}:{address[1]}."
                                 f"\nFlushing reachability table..."
                                 f"\nWill ignore updates for {IGNORE_AFTER_FLOOD_INTERVAL} seconds.", self)
 
             # Continue the flood with one less hop
-            self.send_flood_message(hops - 1)
+			if hops < 0:
+				utility.log_message_force(f"Received a flood with too few hops from {address}!")
+			elif hops > 255:
+				utility.log_message_force(f"Received a flood with too many hops from {address}!")
+		    elif hops != 0:   
+				self.send_flood_message(hops - 1)
 
         elif message_type == PKT_TYPE_DATA_MSG:
             ip_bytes = message[1:5]
@@ -469,7 +474,7 @@ class UDPNode:
             cost = int.from_bytes(tuple_bytes[7:], byteorder='big', signed=False)
 
             offset += TUPLE_SIZE
-            utility.log_message(f"ADDRESS: {ip}, SUBNET MASK: {mask}, COST: {cost}", self)
+            # utility.log_message(f"ADDRESS: {ip}, SUBNET MASK: {mask}, COST: {cost}", self)
 
             self.update_reachability_table(ip, port, mask, cost, origin_node)
 
@@ -596,10 +601,11 @@ class UDPNode:
 
         if not self.reachability_table:
             utility.log_message_force("The reachability table is empty.", self)
-
         else:
+            i = 1
             for (ip, port), (mask, (ip2, port2), cost) in self.reachability_table.items():
-                utility.log_message_force(f"Destiny: {ip}:{port}/{mask}, through: {ip2}:{port2}, cost: {cost}.", self)
+                utility.log_message_force(f"{i} - Destiny: {ip}:{port}/{mask}, through: {ip2}:{port2}, cost: {cost}.", self)
+                i += 1
 
         self.reachability_table_lock.release()
 

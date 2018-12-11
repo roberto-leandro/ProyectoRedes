@@ -42,17 +42,10 @@ def commands_from_csv(csv_file):
                 neighbors += f"{node_b[0]} {node_b[1]} {node_b[2]} {cost} "
             elif node_b == node:
                 neighbors += f"{node_a[0]} {node_a[1]} {node_a[2]} {cost} "
-
-        lol = True
-        if lol:
+		
+		# TODO receive this IP as an arg
+        if node[0]=='10.1.137.91':
             os.system(f"start cmd /c UDPNode.py {this_node} {neighbors}")
-        else:
-            processes = list()
-            new_process = multiprocessing.Process(target=spawn_node, args=(node, edges))
-            processes.append(new_process)
-
-            for process in processes:
-                process.start()
 
 
 if __name__ == "__main__":
